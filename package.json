@@ -1,0 +1,56 @@
+{
+  "name": "cooperativa-terceiros",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "preinstall": "node scripts/setup-patch-package-bin.cjs",
+    "postinstall": "node scripts/shims/patch-package.cjs",
+    "dev": "next dev",
+    "build": "next build",
+    "analyze": "ANALYZE=true next build",
+    "start": "next start",
+    "lint": "node scripts/offline-lint.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "backfill:display-status": "node scripts/run-ts.cjs scripts/backfill-display-status.ts",
+    "backfill:service-search": "node scripts/run-ts.cjs scripts/backfill-service-search.ts",
+    "backfill:service-assignment": "node scripts/run-ts.cjs scripts/backfill-service-assignment.ts",
+    "backfill:legacy-service-updates": "node scripts/run-ts.cjs scripts/backfill-legacy-service-updates.ts"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^5.2.2",
+    "@radix-ui/react-dialog": "^1.1.1",
+    "aws4fetch": "^1.0.15",
+    "date-fns": "^4.1.0",
+    "firebase": "^10.13.2",
+    "firebase-admin": "^12.6.0",
+    "lucide-react": "^0.474.0",
+    "nanoid": "^5.1.6",
+    "next": "15.5.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.64.0",
+    "recharts": "^2.12.6",
+    "sonner": "^1.4.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@next/bundle-analyzer": "^15.5.4",
+    "@types/node": "^20.12.12",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.4",
+    "jsdom": "^27.3.0",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.1"
+  },
+  "engines": {
+    "node": "20.x",
+    "npm": "10.x"
+  }
+}

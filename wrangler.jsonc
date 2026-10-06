@@ -1,0 +1,67 @@
+{
+  "name": "cooperativa-terceiros-workers",
+  "type": "javascript",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-12-16",
+
+  // R2 Bucket Binding Configuration
+  "r2_buckets": [
+    {
+      "binding": "R2_BUCKET",
+      "bucket_name": "inspecoes-lar",
+      // Uncomment for testing against real R2 during development
+      // "remote": true
+    }
+  ],
+
+  // Environment Variables
+  "vars": {
+    // Cloudflare Account ID - Required for S3 API endpoint
+    "CLOUDFLARE_ACCOUNT_ID": "",
+
+    // R2 Bucket Name
+    "R2_BUCKET_NAME": "inspecoes-lar",
+
+    // Public custom domain for serving images
+    // Example: "images.example.com" or "localhost:8787" for local dev
+    "PUBLIC_DOMAIN": "localhost:8787",
+
+    // Presigned URL expiration in seconds (1 - 604,800 / 7 days)
+    "PRESIGNED_URL_EXPIRY": "3600"
+  },
+
+  // Secrets - Set via: npx wrangler secret put <NAME>
+  // Never commit these to version control
+  // "secret_1_example": "set via 'wrangler secret put' command",
+
+  // Development Configuration
+  "env": {
+    "development": {
+      "vars": {
+        "CLOUDFLARE_ACCOUNT_ID": "",
+        "PUBLIC_DOMAIN": "localhost:8787"
+      },
+      "r2_buckets": [
+        {
+          "binding": "R2_BUCKET",
+          "bucket_name": "inspecoes-lar"
+          // Use local storage for dev, or uncomment to test with real R2:
+          // "remote": true
+        }
+      ]
+    },
+    "production": {
+      "vars": {
+        "CLOUDFLARE_ACCOUNT_ID": "",
+        "PUBLIC_DOMAIN": "images.inspecoes.example.com"
+      },
+      "r2_buckets": [
+        {
+          "binding": "R2_BUCKET",
+          "bucket_name": "inspecoes-lar",
+          "remote": true
+        }
+      ]
+    }
+  }
+}

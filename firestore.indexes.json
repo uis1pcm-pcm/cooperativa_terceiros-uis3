@@ -1,0 +1,114 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "accessTokens",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "targetType", "mode": "ASCENDING" },
+        { "fieldPath": "targetId", "mode": "ASCENDING" },
+        { "fieldPath": "status", "mode": "ASCENDING" },
+        { "fieldPath": "createdAt", "mode": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "accessTokens",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "targetType", "mode": "ASCENDING" },
+        { "fieldPath": "targetId", "mode": "ASCENDING" },
+        { "fieldPath": "status", "mode": "ASCENDING" },
+        { "fieldPath": "company", "mode": "ASCENDING" },
+        { "fieldPath": "createdAt", "mode": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "accessTokens",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "targetType", "mode": "ASCENDING" },
+        { "fieldPath": "targetId", "mode": "ASCENDING" },
+        { "fieldPath": "createdAt", "mode": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "services",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "mode": "ASCENDING" },
+        { "fieldPath": "empresa", "mode": "ASCENDING" },
+        { "fieldPath": "searchTokens", "mode": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "services",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "mode": "ASCENDING" },
+        { "fieldPath": "searchTokens", "mode": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "services",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empresa", "mode": "ASCENDING" },
+        { "fieldPath": "searchTokens", "mode": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "services",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "mode": "ASCENDING" },
+        { "fieldPath": "empresa", "mode": "ASCENDING" },
+        { "fieldPath": "updatedAt", "mode": "DESCENDING" },
+        { "fieldPath": "__name__", "mode": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "services",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "mode": "ASCENDING" },
+        { "fieldPath": "updatedAt", "mode": "DESCENDING" },
+        { "fieldPath": "__name__", "mode": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "services",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empresa", "mode": "ASCENDING" },
+        { "fieldPath": "updatedAt", "mode": "DESCENDING" },
+        { "fieldPath": "__name__", "mode": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "services",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "displayStatus", "mode": "ASCENDING" },
+        { "fieldPath": "packageId", "mode": "ASCENDING" },
+        { "fieldPath": "folderId", "mode": "ASCENDING" },
+        { "fieldPath": "createdAt", "mode": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "services",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "packageId", "mode": "ASCENDING" },
+        { "fieldPath": "empresa", "mode": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "services",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "mode": "ASCENDING" },
+        { "fieldPath": "createdAt", "mode": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    // Production rules: limit access to signed-in users and rely on server/Admin APIs for
+    // administrative collections such as accessTokens or packageFolders mutations.
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasServiceTokenAccess(serviceId) {
+      return request.auth != null &&
+        (
+          request.auth.token.serviceId == serviceId ||
+          (request.auth.token.serviceIds is list && request.auth.token.serviceIds.hasAny([serviceId])) ||
+          (request.auth.token.allowedServices is list && request.auth.token.allowedServices.hasAny([serviceId])) ||
+          (request.auth.token.allowedServiceIds is list && request.auth.token.allowedServiceIds.hasAny([serviceId])) ||
+          (request.auth.token.serviceAccess is map && request.auth.token.serviceAccess[serviceId] == true)
+        );
+    }
+
+    function isServiceReader(serviceId) {
+      return isSignedIn() || hasServiceTokenAccess(serviceId);
+    }
+
+    match /users/{userId}/{document=**} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /services/{serviceId} {
+      allow read: if isServiceReader(serviceId);
+      allow write: if isSignedIn();
+
+      match /{document=**} {
+        allow read: if isServiceReader(serviceId);
+        allow write: if isSignedIn();
+      }
+    }
+
+    match /packages/{packageId} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /packageFolders/{folderId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    match /accessTokens/{tokenId} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
