@@ -1,6 +1,7 @@
 import type { Service } from "@/types";
 import { formatDayKey } from "@/lib/formatDateTime";
 import { parseDayFirstDateStringToUtcDate, parsePortugueseDateStringToUtcDate } from "@/lib/dateParsing";
+import { parseDateOnly } from "@/lib/dateOnly";
 import { DEFAULT_TIME_ZONE, startOfDayInTimeZone } from "@/lib/referenceDate";
 
 export function clampProgress(value: number): number {
@@ -157,6 +158,9 @@ export function toDate(value: DateInput): Date | null {
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (!trimmed) return null;
+
+    const isoDatePart = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:$|[T ])/);
+    if (isoDatePart && !parseDateOnly(isoDatePart[1])) return null;
 
     // Suporte a "dd/MM/yyyy" e "dd/MM/yy" (com "/" ou "-"), comum no input do usuário.
     const brDate = parseDayFirstDateStringToUtcDate(trimmed);
@@ -600,13 +604,31 @@ export function obterIntervaloSubpacote(
   let menor: Date | null = null;
   let maior: Date | null = null;
   for (const servico of servicos) {
-    const range = resolveDateRange(servico);
-    if (!range) continue;
-    if (!menor || range.inicio.getTime() < menor.getTime()) {
-      menor = range.inicio;
+    const inicio = getDateFromKeys(servico, [
+      "dataInicio",
+      "inicioPrevisto",
+      "inicioPlanejado",
+      "plannedStart",
+      "startDate",
+      "inicio",
+    ]);
+    const fim = getDateFromKeys(servico, [
+      "dataFim",
+      "fimPrevisto",
+      "fimPlanejado",
+      "plannedEnd",
+      "endDate",
+      "fim",
+    ]);
+    const limiteInicio = inicio ?? fim;
+    const limiteFim = fim ?? inicio;
+    if (!limiteInicio || !limiteFim) continue;
+
+    if (!menor || limiteInicio.getTime() < menor.getTime()) {
+      menor = limiteInicio;
     }
-    if (!maior || range.fim.getTime() > maior.getTime()) {
-      maior = range.fim;
+    if (!maior || limiteFim.getTime() > maior.getTime()) {
+      maior = limiteFim;
     }
   }
   return { inicio: menor, fim: maior };

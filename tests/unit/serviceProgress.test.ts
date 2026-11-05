@@ -979,21 +979,81 @@ describe("serviceProgress utilities", () => {
   });
 
   describe("obterIntervaloSubpacote", () => {
-    it("returns the earliest start and latest finish across services", () => {
+    it("returns the earliest start and latest finish across services regardless of order", () => {
       const intervalo = obterIntervaloSubpacote({
         servicos: [
           { horasPrevistas: 5, dataInicio: "2024-02-10", dataFim: "2024-02-20" },
+          { horasPrevistas: 5, dataInicio: "2024-03-04", dataFim: "2024-03-04" },
           { horasPrevistas: 5, dataInicio: "2024-02-01", dataFim: "2024-03-01" },
         ],
       });
       expect(intervalo.inicio?.toISOString()).toBe(new Date("2024-02-01T00:00:00.000Z").toISOString());
+      expect(intervalo.fim?.toISOString()).toBe(new Date("2024-03-04T00:00:00.000Z").toISOString());
+    });
+
+    it("uses a single valid service date as both available boundaries", () => {
+      const intervalo = obterIntervaloSubpacote({
+        servicos: [
+          { dataInicio: "2024-02-10", dataFim: null },
+          { dataInicio: "invalid", dataFim: "2024-03-01" },
+        ],
+      });
+      expect(intervalo.inicio?.toISOString()).toBe(new Date("2024-02-10T00:00:00.000Z").toISOString());
       expect(intervalo.fim?.toISOString()).toBe(new Date("2024-03-01T00:00:00.000Z").toISOString());
     });
 
-    it("falls back to null values when there are no valid ranges", () => {
-      const intervalo = obterIntervaloSubpacote({ servicos: [{ horasPrevistas: 5 }] });
+    it("recalculates the range when services are added, changed, or removed", () => {
+      const originalServices = [
+        { dataInicio: "2024-02-10", dataFim: "2024-02-20" },
+        { dataInicio: "2024-02-05", dataFim: "2024-02-25" },
+      ];
+      const withEarlierAndLaterServices = [
+        ...originalServices,
+        { dataInicio: "2024-02-01", dataFim: "2024-03-01" },
+      ];
+      const changedService = [
+        { dataInicio: "2024-02-10", dataFim: "2024-02-20" },
+        { dataInicio: "2024-02-07", dataFim: "2024-02-28" },
+      ];
+
+      expect(obterIntervaloSubpacote({ servicos: withEarlierAndLaterServices })).toEqual({
+        inicio: new Date("2024-02-01T00:00:00.000Z"),
+        fim: new Date("2024-03-01T00:00:00.000Z"),
+      });
+      expect(obterIntervaloSubpacote({ servicos: changedService })).toEqual({
+        inicio: new Date("2024-02-07T00:00:00.000Z"),
+        fim: new Date("2024-02-28T00:00:00.000Z"),
+      });
+      expect(obterIntervaloSubpacote({ servicos: originalServices })).toEqual({
+        inicio: new Date("2024-02-05T00:00:00.000Z"),
+        fim: new Date("2024-02-25T00:00:00.000Z"),
+      });
+    });
+
+    it("keeps schedule ranges separate for different subpackages", () => {
+      const firstSubpackage = obterIntervaloSubpacote({
+        servicos: [{ dataInicio: "2024-02-01", dataFim: "2024-02-10" }],
+      });
+      const secondSubpackage = obterIntervaloSubpacote({
+        servicos: [{ dataInicio: "2024-03-01", dataFim: "2024-03-10" }],
+      });
+
+      expect(firstSubpackage.inicio?.toISOString()).toBe("2024-02-01T00:00:00.000Z");
+      expect(firstSubpackage.fim?.toISOString()).toBe("2024-02-10T00:00:00.000Z");
+      expect(secondSubpackage.inicio?.toISOString()).toBe("2024-03-01T00:00:00.000Z");
+      expect(secondSubpackage.fim?.toISOString()).toBe("2024-03-10T00:00:00.000Z");
+    });
+
+    it("falls back to null values when there are no valid dates", () => {
+      const intervalo = obterIntervaloSubpacote({
+        servicos: [
+          { horasPrevistas: 5 },
+          { dataInicio: "invalid", dataFim: "2024-02-30" },
+        ],
+      });
       expect(intervalo.inicio).toBeNull();
       expect(intervalo.fim).toBeNull();
+      expect(obterIntervaloSubpacote({ servicos: [] })).toEqual({ inicio: null, fim: null });
     });
   });
 });

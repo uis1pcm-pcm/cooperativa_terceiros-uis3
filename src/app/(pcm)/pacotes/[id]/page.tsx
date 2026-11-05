@@ -569,6 +569,28 @@ async function renderPackageDetailPage(
     }
   }
 
+  // Cronogramas consolidados precisam considerar todos os IDs dos subpacotes,
+  // mesmo quando a tela limita os detalhes exibidos para evitar travamentos.
+  const scheduleServicesById = new Map(services.map((service) => [service.id, service]));
+  const scheduleServiceIdsToFetch = folderServiceSelection.folderServiceIds.filter(
+    (serviceId) => !scheduleServicesById.has(serviceId),
+  );
+  if (scheduleServiceIdsToFetch.length) {
+    try {
+      const scheduleServices = await getServicesByIds(scheduleServiceIdsToFetch, { mode: "summary" });
+      scheduleServices.forEach((service) => scheduleServicesById.set(service.id, service));
+      if (scheduleServiceIdsToFetch.some((serviceId) => !scheduleServicesById.has(serviceId))) {
+        registerWarning("Algumas datas dos serviços dos subpacotes não puderam ser carregadas.");
+      }
+    } catch (error) {
+      registerWarning(
+        "Não foi possível carregar as datas de todos os serviços dos subpacotes.",
+        error,
+        "Falha ao carregar datas consolidadas dos subpacotes",
+      );
+    }
+  }
+
   const allKnownServiceIds = new Set([...uniqueServiceIds, ...folderOnlyServiceIds]);
   if (allKnownServiceIds.size > serviceCountReference) {
     serviceCountReference = allKnownServiceIds.size;
@@ -684,18 +706,34 @@ async function renderPackageDetailPage(
     string,
     { plannedPercent: number; realizedPercent: number; startDateMs: number | null; endDateMs: number | null }
   >();
+  const folderScheduleMap = new Map(
+    folders.map((folder) => {
+      const servicos = folder.services
+        .map((serviceId) => scheduleServicesById.get(serviceId))
+        .filter((service): service is Service => Boolean(service))
+        .map((service) => mapServiceToSubpackageEntry(service));
+      const intervalo = obterIntervaloSubpacote({ servicos });
+      return [
+        folder.id,
+        {
+          startDateMs: intervalo.inicio?.getTime() ?? null,
+          endDateMs: intervalo.fim?.getTime() ?? null,
+        },
+      ];
+    }),
+  );
   subpackagesForCurve.forEach((subpacote) => {
     if (!subpacote?.id) return;
     const plannedPercentRaw = calcularPercentualSubpacote(subpacote, referenceDate);
     const realizedPercentRaw = calcularPercentualRealizadoSubpacote(subpacote, referenceDate);
     const plannedPercent = Math.round(plannedPercentRaw);
     const realizedPercent = Math.round(realizedPercentRaw);
-    const intervalo = obterIntervaloSubpacote(subpacote);
+    const schedule = folderScheduleMap.get(subpacote.id);
     folderAnalyticsMap.set(subpacote.id, {
       plannedPercent,
       realizedPercent,
-      startDateMs: intervalo.inicio ? intervalo.inicio.getTime() : null,
-      endDateMs: intervalo.fim ? intervalo.fim.getTime() : null,
+      startDateMs: schedule?.startDateMs ?? null,
+      endDateMs: schedule?.endDateMs ?? null,
     });
   });
   folders = folders.map((folder) => {
