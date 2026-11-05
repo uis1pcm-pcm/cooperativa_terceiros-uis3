@@ -11,6 +11,7 @@ import { formatCanonicalProgressLabel, formatUpdateSummary } from "@/lib/service
 import {
   calcularCurvaSPlanejada,
   calcularCurvaSRealizada,
+  calcularMetricasPorEmpresa,
   calcularMetricasPorSetor,
   calcularMetricasSubpacote,
   calcularPercentualPlanejadoPacote,
@@ -747,11 +748,11 @@ async function renderPackageDetailPage(
     };
   });
 
-  const folderLookup = new Map<string, { id: string; name?: string | null }>();
+  const folderLookup = new Map<string, { id: string; name?: string | null; companyId?: string | null }>();
   folders.forEach((folder) => {
     folder.services.forEach((serviceId) => {
       if (!serviceId) return;
-      folderLookup.set(serviceId, { id: folder.id, name: folder.name });
+      folderLookup.set(serviceId, { id: folder.id, name: folder.name, companyId: folder.companyId });
     });
   });
 
@@ -769,11 +770,13 @@ async function renderPackageDetailPage(
       folderId: folderData?.id ?? directFolderId,
       pastaId: directFolderId ?? (service as { pastaId?: string | null }).pastaId,
       folderName: folderData?.name ?? null,
+      folderCompanyId: folderData?.companyId ?? null,
     };
   });
 
   const subpackageMetrics = calcularMetricasSubpacote(servicesWithFolderContext, referenceDate);
   const sectorMetrics = calcularMetricasPorSetor(servicesWithFolderContext, referenceDate);
+  const companyMetrics = calcularMetricasPorEmpresa(servicesWithFolderContext, referenceDate);
 
   const formatPercentValue = (value: number): string => {
     if (!Number.isFinite(value)) return "0";
@@ -1187,6 +1190,56 @@ async function renderPackageDetailPage(
           ) : (
             <p className="text-sm text-muted-foreground">
               Não há setores cadastrados para este pacote.
+            </p>
+          )}
+        </div>
+
+        <div className="summary-block-item space-y-3 print-keep-with-next print:space-y-2">
+          <h2 className="text-lg font-semibold print:text-base print:mb-1">Resumo por Empresa</h2>
+          {companyMetrics.length ? (
+            <div className="summary-table-wrapper overflow-x-auto rounded-xl border bg-card print:overflow-visible print:border-0 print:bg-white print:rounded-none print-full-width">
+              <table className="summary-table mt-2 min-w-full border-collapse text-center print-plain-table print:mt-0">
+                <thead className="bg-muted/80 text-foreground print:bg-white">
+                  <tr>
+                    <th className="border border-border p-3 print:p-2 text-left">Empresa</th>
+                    <th className="border border-border p-3 print:p-2">% Atual</th>
+                    <th className="border border-border p-3 print:p-2">% Deveria Estar</th>
+                    <th className="border border-border p-3 print:p-2">Total de Horas</th>
+                    <th className="border border-border p-3 print:p-2">Horas que Deveriam Estar</th>
+                    <th className="border border-border p-3 print:p-2">Horas atual</th>
+                    <th className="border border-border p-3 print:p-2">Diferença</th>
+                  </tr>
+                </thead>
+                <tbody className="text-foreground">
+                  {companyMetrics.map((metric) => (
+                    <tr key={metric.empresa} className="odd:bg-muted/40 print:bg-white">
+                      <td className="border border-border p-3 print:p-2 text-left font-medium">{metric.empresa}</td>
+                      <td className="border border-border p-3 print:p-2 font-semibold">
+                        {formatPercentValue(metric.realizedPercent)}%
+                      </td>
+                      <td className="border border-border p-3 print:p-2 font-semibold">
+                        {formatPercentValue(metric.plannedPercent)}%
+                      </td>
+                      <td className="border border-border p-3 print:p-2 font-semibold">
+                        {formatHoursValue(metric.totalHours)}
+                      </td>
+                      <td className="border border-border p-3 print:p-2 font-semibold">
+                        {formatHoursValue(metric.horasQueDeveriamEstar)}
+                      </td>
+                      <td className="border border-border p-3 print:p-2 font-semibold">
+                        {formatHoursValue(metric.horasAtual)}
+                      </td>
+                      <td className="border border-border p-3 print:p-2 font-semibold">
+                        {formatHoursValue(metric.diferenca)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Não há empresas cadastradas para este pacote.
             </p>
           )}
         </div>
