@@ -545,8 +545,8 @@ function calcularPercentualPlanejadoDoServico(
   referencia: Date,
 ): number {
   const referenciaMs = startOfDay(referencia).getTime();
-  const inicioMs = servico.inicio.getTime();
-  const fimMs = servico.fim.getTime();
+  const inicioMs = startOfDay(servico.inicio).getTime();
+  const fimMs = startOfDay(servico.fim).getTime();
 
   if (referenciaMs < inicioMs) {
     return 0;
@@ -572,8 +572,10 @@ function mapServicoParaPercentual(
   servico: ServicoDoSubpacote,
   referencia: Date,
 ): ServiceProgressEntry | null {
+  const horasPrevistas = extractHorasPrevistas(servico);
+  if (!horasPrevistas) return null;
   const preparado = prepararServicoPlanejado(servico);
-  if (!preparado) return null;
+  if (!preparado) return { horasPrevistas, percentual: 0 };
   const percentual = calcularPercentualPlanejadoDoServico(preparado, referencia);
   return { horasPrevistas: preparado.horasPrevistas, percentual };
 }
@@ -870,26 +872,9 @@ export function calcularPercentualPlanejadoServico(
   if (typeof percentualPlanejadoDaSerie === "number") {
     return percentualPlanejadoDaSerie;
   }
-
-  const referenciaMs = referencia.getTime();
-  const inicioMs = range.inicio.getTime();
-  const fimMs = range.fim.getTime();
-
-  if (referenciaMs < inicioMs) {
-    return 0;
-  }
-  if (referenciaMs >= fimMs) {
-    return 100;
-  }
-
-  // O percentual do serviço representa a interpolação entre os marcos: 0% no
-  // início e 100% no fim. Usar dias inclusivos fazia o serviço já começar com
-  // avanço e deslocava o "planejado até hoje" para uma data incorreta.
-  const diasTotais = Math.max(1, Math.floor((fimMs - inicioMs) / DAY_IN_MS));
-  const diasDecorridos = Math.floor((referenciaMs - inicioMs) / DAY_IN_MS);
-  if (diasDecorridos <= 0) return 0;
-
-  return clampPercentage((diasDecorridos / diasTotais) * 100);
+  const preparado = prepararServicoPlanejado(servico as ServicoDoSubpacote);
+  if (!preparado) return 0;
+  return calcularPercentualPlanejadoDoServico(preparado, referencia);
 }
 
 export function resolveServicoPercentualPlanejado(
@@ -964,7 +949,7 @@ export function resolveServicoRealPercent(
 
   if (
     rawStatus === "pendente" &&
-    previousProgress !== null &&
+    previousProgress != null &&
     (canonicalStoredProgress === undefined || canonicalStoredProgress >= 100)
   ) {
     const clamped = clampProgress(previousProgress);
@@ -1075,7 +1060,10 @@ export function calcularCurvaSPlanejada(
       linhaDoTempo = [startOfDay(referencia)];
     }
   }
-  const somaHoras = preparados.reduce((total, servico) => total + servico.horasPrevistas, 0);
+  const somaHoras = coletarServicosDoPacote(pacote).reduce(
+    (total, servico) => total + (extractHorasPrevistas(servico) ?? 0),
+    0,
+  );
   return linhaDoTempo.map((data) => ({
     data,
     percentual:
@@ -1158,6 +1146,7 @@ type PcmService = Service & {
   folderId?: string | null;
   pastaId?: string | null;
   folderName?: string | null;
+  folderCompanyId?: string | null;
 };
 
 // Usa a mesma regra de ponderação aplicada nos cálculos de percentual,
@@ -1367,4 +1356,73 @@ export function calcularMetricasPorSetor(
       };
     })
     .sort((a, b) => a.setor.localeCompare(b.setor, "pt-BR", { sensitivity: "base" }));
+}
+
+export function calcularMetricasPorEmpresa(
+  services: PcmService[],
+  dataReferencia?: DateInput,
+): Array<{
+  empresa: string;
+  plannedPercent: number;
+  realizedPercent: number;
+  totalHours: number;
+  horasQueDeveriamEstar: number;
+  horasAtual: number;
+  diferenca: number;
+}> {
+  if (!Array.isArray(services) || services.length === 0) return [];
+
+  const referencia = startOfDay(toDate(dataReferencia ?? new Date()) ?? new Date());
+  const grupos = new Map<string, { servicos: PcmService[] }>();
+
+  services.forEach((servico) => {
+    const assignedTo = (servico as { assignedTo?: { companyName?: string; companyId?: string } }).assignedTo;
+    const empresa =
+      (typeof servico.empresa === "string" && servico.empresa.trim()) ||
+      (typeof servico.company === "string" && servico.company.trim()) ||
+      assignedTo?.companyName?.trim() ||
+      assignedTo?.companyId?.trim() ||
+      servico.folderCompanyId?.trim() ||
+      "Sem empresa";
+    const existente = grupos.get(empresa) ?? { servicos: [] };
+    existente.servicos.push(servico);
+    grupos.set(empresa, existente);
+  });
+
+  return Array.from(grupos.entries())
+    .map(([empresa, grupo]) => {
+      let totalHours = 0;
+      let sumWeightedPlanned = 0;
+      let sumWeightedRealized = 0;
+
+      grupo.servicos.forEach((servico) => {
+        const horas = normalizarHorasTotal(servico);
+        if (horas <= 0) return;
+        totalHours += horas;
+
+        const plannedPercent = calcularPercentualPlanejadoServico(servico, referencia);
+        const range = resolveDateRange(servico);
+        const realizado: ServicoRealizadoNormalizado = {
+          horasPrevistas: horas,
+          atualizacoes: coletarAtualizacoesDoServico(servico, range?.inicio),
+        };
+        const realizedPercent = percentualRealizadoAte(realizado, referencia);
+        sumWeightedPlanned += plannedPercent * horas;
+        sumWeightedRealized += realizedPercent * horas;
+      });
+
+      const plannedPercentRaw = totalHours > 0 ? sumWeightedPlanned / totalHours : 0;
+      const realizedPercentRaw = totalHours > 0 ? sumWeightedRealized / totalHours : 0;
+
+      return {
+        empresa,
+        plannedPercent: Math.round(clampPercentageValue(plannedPercentRaw)),
+        realizedPercent: Math.round(clampPercentageValue(realizedPercentRaw)),
+        totalHours,
+        horasQueDeveriamEstar: roundToTwoDecimals(totalHours * plannedPercentRaw * 0.01),
+        horasAtual: roundToTwoDecimals(totalHours * realizedPercentRaw * 0.01),
+        diferenca: roundToTwoDecimals(totalHours * (realizedPercentRaw - plannedPercentRaw) * 0.01),
+      };
+    })
+    .sort((a, b) => a.empresa.localeCompare(b.empresa, "pt-BR", { sensitivity: "base" }));
 }

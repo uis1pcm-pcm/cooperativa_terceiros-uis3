@@ -6,6 +6,7 @@ import {
   calcularPercentualPlanejadoPacote,
   calcularPercentualRealizadoPacote,
   calcularPercentualPlanejadoServico,
+  calcularMetricasPorEmpresa,
   calcularCurvaSPlanejada,
   calcularCurvaSRealizada,
   calcularIndicadoresCurvaS,
@@ -86,14 +87,14 @@ describe("serviceProgress utilities", () => {
           updates: [
             {
               id: "update-1",
-              date: "2025-01-02",
+              date: Date.parse("2025-01-02"),
               createdAt: Date.parse("2025-01-02"),
               percent: 20,
               description: "",
             },
             {
               id: "update-2",
-              date: "2025-01-09",
+              date: Date.parse("2025-01-09"),
               createdAt: Date.parse("2025-01-09"),
               percent: 80,
               description: "",
@@ -108,6 +109,75 @@ describe("serviceProgress utilities", () => {
       expect(earlyReference.realizedPercent).toBe(80);
       expect(lateReference.realizedPercent).toBe(80);
       expect(earlyReference.plannedPercent).not.toBe(lateReference.plannedPercent);
+    });
+
+    it("calcula horas planejadas e diferença com o percentual consolidado", () => {
+      const [metric] = calcularMetricasSubpacote(
+        [{
+          id: "service-1",
+          os: "OS-1",
+          folderId: "folder-1",
+          folderName: "Subpacote 1",
+          totalHours: 50,
+          status: "Aberto",
+          createdAt: Date.parse("2026-01-01"),
+          plannedStart: "2026-11-03",
+          plannedEnd: "2026-11-07",
+          updates: [{
+            id: "update-1",
+            date: Date.parse("2026-11-05"),
+            createdAt: Date.parse("2026-11-05"),
+            percent: 48,
+            description: "",
+          }],
+        }],
+        "2026-11-05",
+      );
+
+      expect(metric.plannedPercent).toBe(60);
+      expect(metric.realizedPercent).toBe(48);
+      expect(metric.horasQueDeveriamEstar).toBe(30);
+      expect(metric.horasAtual).toBe(24);
+      expect(metric.diferenca).toBe(-6);
+    });
+
+    it("retém como peso os serviços com cronograma inválido", () => {
+      const percent = calcularPercentualSubpacote(
+        {
+          servicos: [
+            { horasPrevistas: 10, dataInicio: "2026-11-03", dataFim: "2026-11-07" },
+            { horasPrevistas: 30, dataInicio: "inválida", dataFim: "2026-11-07" },
+          ],
+        },
+        "2026-11-05",
+      );
+
+      expect(percent).toBe(15);
+    });
+
+    it("consolida o planejado por empresa ponderando pelas horas", () => {
+      const metrics = calcularMetricasPorEmpresa(
+        [
+          {
+            id: "service-1", os: "OS-1", totalHours: 10, status: "Aberto", createdAt: 0,
+            plannedStart: "2026-11-03", plannedEnd: "2026-11-07", company: "Empresa A",
+          },
+          {
+            id: "service-2", os: "OS-2", totalHours: 30, status: "Aberto", createdAt: 0,
+            plannedStart: "2026-11-05", plannedEnd: "2026-11-09", empresa: "Empresa A",
+          },
+          {
+            id: "service-3", os: "OS-3", totalHours: 10, status: "Aberto", createdAt: 0,
+            plannedStart: "2026-11-03", plannedEnd: "2026-11-07", folderCompanyId: "Empresa B",
+          },
+        ],
+        "2026-11-05",
+      );
+
+      expect(metrics).toHaveLength(2);
+      expect(metrics[0]).toMatchObject({ empresa: "Empresa A", plannedPercent: 30, totalHours: 40 });
+      expect(metrics[0].horasQueDeveriamEstar).toBe(12);
+      expect(metrics[1]).toMatchObject({ empresa: "Empresa B", plannedPercent: 60, totalHours: 10 });
     });
   });
 
@@ -545,6 +615,45 @@ describe("serviceProgress utilities", () => {
   describe("calcularPercentualPlanejadoServico", () => {
     const reference = new Date("2024-01-10T00:00:00Z");
 
+    it("calcula 60% no terceiro dia de um cronograma de cinco dias", () => {
+      expect(
+        calcularPercentualPlanejadoServico(
+          { dataInicio: "2026-11-03", dataFim: "2026-11-07" },
+          "2026-11-05",
+        ),
+      ).toBe(60);
+    });
+
+    it("retorna zero antes do início e 100% na data final ou depois", () => {
+      const service = { dataInicio: "2026-11-03", dataFim: "2026-11-07" };
+
+      expect(calcularPercentualPlanejadoServico(
+        { dataInicio: "2026-11-06", dataFim: "2026-11-10" },
+        "2026-11-05",
+      )).toBe(0);
+      expect(calcularPercentualPlanejadoServico(service, "2026-11-07")).toBe(100);
+      expect(calcularPercentualPlanejadoServico(service, "2026-11-08")).toBe(100);
+    });
+
+    it("pondera subpacotes por horas e mantém zero para cronogramas inválidos", () => {
+      const percent = calcularPercentualSubpacote(
+        {
+          servicos: [
+            { horasPrevistas: 10, dataInicio: "2026-11-03", dataFim: "2026-11-07" },
+            { horasPrevistas: 30, dataInicio: "2026-11-05", dataFim: "2026-11-09" },
+            { horasPrevistas: 5, dataInicio: "inválida", dataFim: "2026-11-09" },
+          ],
+        },
+        "2026-11-05",
+      );
+
+      expect(percent).toBeCloseTo((60 * 10 + 20 * 30) / 45, 5);
+      expect(calcularPercentualPlanejadoServico(
+        { dataInicio: "inválida", dataFim: "2026-11-09" },
+        "2026-11-05",
+      )).toBe(0);
+    });
+
     it("returns zero when reference is before start", () => {
       const percentual = calcularPercentualPlanejadoServico(
         {
@@ -556,7 +665,7 @@ describe("serviceProgress utilities", () => {
       expect(percentual).toBe(0);
     });
 
-    it("returns zero progress at the start milestone", () => {
+    it("counts the start day as the first planned day", () => {
       const percentual = calcularPercentualPlanejadoServico(
         {
           dataInicio: new Date("2024-01-10T00:00:00Z"),
@@ -564,7 +673,7 @@ describe("serviceProgress utilities", () => {
         },
         new Date("2024-01-10T00:00:00Z"),
       );
-      expect(percentual).toBe(0);
+      expect(percentual).toBeCloseTo(100 / 11, 5);
     });
 
     it("returns one hundred when reference is after finish", () => {
@@ -586,8 +695,8 @@ describe("serviceProgress utilities", () => {
         },
         reference,
       );
-      // Start date counts as 0% and end date counts as 100% for the planned curve.
-      expect(percentual).toBeCloseTo(90, 5);
+      // The inclusive schedule has eleven days; Jan 10 is the tenth elapsed day.
+      expect(percentual).toBeCloseTo((10 / 11) * 100, 5);
     });
 
     it("prefers plannedDaily series when available", () => {
@@ -649,7 +758,7 @@ describe("serviceProgress utilities", () => {
         referenceDate,
       );
 
-      expect(percentual).toBeCloseTo((4 / 9) * 100, 5);
+      expect(percentual).toBe(50);
     });
   });
 
@@ -678,9 +787,9 @@ describe("serviceProgress utilities", () => {
 
       expect(result).toHaveLength(2);
       expect(result[0]).toMatchObject({ id: "abc", descricao: "Serviço 1", percentualReal: 55 });
-      expect(result[0].percentualPlanejado).toBeCloseTo(50, 5);
+      expect(result[0].percentualPlanejado).toBeCloseTo((6 / 11) * 100, 5);
       expect(result[1]).toMatchObject({ id: "2", descricao: "Serviço 2", percentualReal: 100 });
-      expect(result[1].percentualPlanejado).toBeCloseTo(10, 5);
+      expect(result[1].percentualPlanejado).toBeCloseTo((2 / 11) * 100, 5);
     });
 
     it("returns zero when real percentage is missing", () => {
