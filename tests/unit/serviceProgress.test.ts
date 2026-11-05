@@ -52,22 +52,54 @@ describe("serviceProgress utilities", () => {
       expect(changed[0].horasQueDeveriamEstar).toBe(1.82);
     });
 
-    it("preserva variações menores que 1% em subpacotes grandes", () => {
-      const services = Array.from({ length: 120 }, (_, index) => ({
-        id: `service-${index}`,
-        os: `OS-${index}`,
-        folderId: "folder-1",
-        folderName: "Subpacote grande",
-        totalHours: 1,
-        status: "Aberto" as const,
-        createdAt: Date.parse("2025-01-01"),
-        plannedStart: index === 0 ? "2025-01-05" : "2025-01-01",
-        plannedEnd: index === 0 ? "2025-01-15" : "2025-01-11",
-      }));
+    it("usa o menor início e o maior fim para o planejado do subpacote", () => {
+      const services = [
+        {
+          id: "service-1",
+          os: "OS-1",
+          folderId: "folder-1",
+          folderName: "Subpacote 1",
+          totalHours: 10,
+          status: "Aberto" as const,
+          createdAt: Date.parse("2025-01-01"),
+          plannedStart: "2025-01-01",
+          plannedEnd: "2025-01-11",
+        },
+        {
+          id: "service-2",
+          os: "OS-2",
+          folderId: "folder-1",
+          folderName: "Subpacote 1",
+          totalHours: 30,
+          status: "Aberto" as const,
+          createdAt: Date.parse("2025-01-01"),
+          plannedStart: "2025-01-05",
+          plannedEnd: "2025-01-15",
+        },
+      ];
 
       const [metric] = calcularMetricasSubpacote(services, "2025-01-06");
 
-      expect(metric.plannedPercent).toBe(54.24);
+      expect(metric.plannedPercent).toBe(40);
+      expect(metric.horasQueDeveriamEstar).toBe(16);
+    });
+
+    it("preserva precisão no planejado de um subpacote com um serviço", () => {
+      const services = [{
+        id: "service-1",
+        os: "OS-1",
+        folderId: "folder-1",
+        folderName: "Subpacote 1",
+        totalHours: 1,
+        status: "Aberto" as const,
+        createdAt: Date.parse("2025-01-01"),
+        plannedStart: "2025-01-01",
+        plannedEnd: "2025-01-11",
+      }];
+
+      const [metric] = calcularMetricasSubpacote(services, "2025-01-06");
+
+      expect(metric.plannedPercent).toBe(54.55);
       expect(metric.plannedPercent).not.toBe(Math.round(metric.plannedPercent));
     });
 

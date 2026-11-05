@@ -544,9 +544,19 @@ function calcularPercentualPlanejadoDoServico(
   servico: PreparedServicoPlanejado,
   referencia: Date,
 ): number {
+  return calcularPercentualPlanejadoDoIntervalo(servico.inicio, servico.fim, referencia);
+}
+
+function calcularPercentualPlanejadoDoIntervalo(
+  inicio: Date,
+  fim: Date,
+  referencia: Date,
+): number {
   const referenciaMs = startOfDay(referencia).getTime();
-  const inicioMs = servico.inicio.getTime();
-  const fimMs = servico.fim.getTime();
+  const inicioDia = startOfDay(inicio);
+  const fimDia = startOfDay(fim);
+  const inicioMs = inicioDia.getTime();
+  const fimMs = fimDia.getTime();
 
   if (referenciaMs < inicioMs) {
     return 0;
@@ -1244,15 +1254,19 @@ export function calcularMetricasSubpacote(
     .map((grupo) => {
       const servicosNormalizados = normalizarServicosParaSubpacote(grupo.servicos);
       const subpacotePlanejado = { servicos: servicosNormalizados };
+      const intervaloPlanejado = obterIntervaloSubpacote(subpacotePlanejado);
       const plannedPercentRaw = clampPercentageValue(
-        calcularPercentualSubpacote(subpacotePlanejado, referenceDate) ?? 0,
+        intervaloPlanejado.inicio && intervaloPlanejado.fim
+          ? calcularPercentualPlanejadoDoIntervalo(
+              intervaloPlanejado.inicio,
+              intervaloPlanejado.fim,
+              referenceDate,
+            )
+          : 0,
       );
       const realizedPercentRaw = clampPercentageValue(
         calcularPercentualRealizadoSubpacote(subpacotePlanejado, currentDate) ?? 0,
       );
-      // Preserve casas decimais: em subpacotes grandes, alterar a data de um
-      // unico servico geralmente muda menos de 1 ponto percentual. Arredondar
-      // para inteiro fazia o Resumo por Subpacote aparentar nao ter recalculado.
       const plannedPercent = roundToTwoDecimals(plannedPercentRaw);
       const realizedPercent = roundToTwoDecimals(realizedPercentRaw);
       const horasQueDeveriamEstar = roundToTwoDecimals(
