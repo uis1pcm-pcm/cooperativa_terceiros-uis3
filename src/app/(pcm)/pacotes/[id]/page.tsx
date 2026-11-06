@@ -213,6 +213,7 @@ function mapServiceToSubpackageEntry(service: Service): ServicoDoSubpacote {
     plannedEnd: service.plannedEnd ?? dataFim ?? undefined,
     endDate: service.endDate ?? dataFim ?? undefined,
     percentualRealAtual: service.progress ?? service.realPercent ?? service.andamento ?? null,
+    plannedDaily: service.plannedDaily,
     updates,
     atualizacoes: updates,
   };
@@ -726,12 +727,10 @@ async function renderPackageDetailPage(
     if (!subpacote?.id) return;
     const plannedPercentRaw = calcularPercentualSubpacote(subpacote, referenceDate);
     const realizedPercentRaw = calcularPercentualRealizadoSubpacote(subpacote, referenceDate);
-    const plannedPercent = Math.round(plannedPercentRaw);
-    const realizedPercent = Math.round(realizedPercentRaw);
     const schedule = folderScheduleMap.get(subpacote.id);
     folderAnalyticsMap.set(subpacote.id, {
-      plannedPercent,
-      realizedPercent,
+      plannedPercent: Math.round(plannedPercentRaw),
+      realizedPercent: Math.round(realizedPercentRaw),
       startDateMs: schedule?.startDateMs ?? null,
       endDateMs: schedule?.endDateMs ?? null,
     });

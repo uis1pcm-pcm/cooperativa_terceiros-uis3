@@ -544,22 +544,7 @@ function calcularPercentualPlanejadoDoServico(
   servico: PreparedServicoPlanejado,
   referencia: Date,
 ): number {
-  const referenciaMs = startOfDay(referencia).getTime();
-  const inicioMs = servico.inicio.getTime();
-  const fimMs = servico.fim.getTime();
-
-  if (referenciaMs < inicioMs) {
-    return 0;
-  }
-  if (referenciaMs >= fimMs) {
-    return 100;
-  }
-
-  const diasTotais = Math.max(1, servico.totalDias);
-  const diasDecorridos = Math.floor((referenciaMs - inicioMs) / DAY_IN_MS) + 1;
-  if (diasDecorridos <= 0) return 0;
-
-  return clampPercentage((diasDecorridos / diasTotais) * 100);
+  return calcularPercentualPlanejadoServico(servico.source, referencia);
 }
 
 function prepararServicosPlanejados(servicos: ServicoDoSubpacote[]): PreparedServicoPlanejado[] {
@@ -574,8 +559,10 @@ function mapServicoParaPercentual(
 ): ServiceProgressEntry | null {
   const preparado = prepararServicoPlanejado(servico);
   if (!preparado) return null;
-  const percentual = calcularPercentualPlanejadoDoServico(preparado, referencia);
-  return { horasPrevistas: preparado.horasPrevistas, percentual };
+  return {
+    horasPrevistas: preparado.horasPrevistas,
+    percentual: calcularPercentualPlanejadoDoServico(preparado, referencia),
+  };
 }
 
 function coletarServicosDoSubpacote(subpacote: SubpacotePlanejado | null | undefined): ServicoDoSubpacote[] {
@@ -746,7 +733,10 @@ export function calcularPercentualSubpacote(
     .map((servico) => mapServicoParaPercentual(servico, referencia))
     .filter((entry): entry is ServiceProgressEntry => Boolean(entry));
 
-  const somaHoras = servicosValidos.reduce((total, entry) => total + entry.horasPrevistas, 0);
+  const somaHoras = listaServicosRaw.reduce(
+    (total, servico) => total + (extractHorasPrevistas(servico) ?? 0),
+    0,
+  );
   if (somaHoras <= 0) return 0;
 
   const somaPonderada = servicosValidos.reduce(
@@ -1075,7 +1065,10 @@ export function calcularCurvaSPlanejada(
       linhaDoTempo = [startOfDay(referencia)];
     }
   }
-  const somaHoras = preparados.reduce((total, servico) => total + servico.horasPrevistas, 0);
+  const somaHoras = servicos.reduce(
+    (total, servico) => total + (extractHorasPrevistas(servico) ?? 0),
+    0,
+  );
   return linhaDoTempo.map((data) => ({
     data,
     percentual:

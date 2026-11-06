@@ -47,12 +47,78 @@ describe("serviceProgress utilities", () => {
         reference,
       );
 
-      expect(original[0].plannedPercent).toBe(54.55);
-      expect(changed[0].plannedPercent).toBe(18.18);
-      expect(changed[0].horasQueDeveriamEstar).toBe(1.82);
+      expect(original[0].plannedPercent).toBe(50);
+      expect(changed[0].plannedPercent).toBe(10);
+      expect(changed[0].horasQueDeveriamEstar).toBe(1);
     });
 
-    it("preserva variações menores que 1% em subpacotes grandes", () => {
+    it("pondera pelo total de horas e segue o cronograma de todos os serviços", () => {
+      const [metric] = calcularMetricasSubpacote(
+        [
+          {
+            id: "service-1",
+            folderId: "folder-1",
+            folderName: "Subpacote 1",
+            totalHours: 100,
+            plannedStart: "2025-01-01",
+            plannedEnd: "2025-01-05",
+          },
+          {
+            id: "service-2",
+            folderId: "folder-1",
+            folderName: "Subpacote 1",
+            totalHours: 50,
+            plannedStart: "2025-01-06",
+            plannedEnd: "2025-01-10",
+          },
+        ],
+        "2025-01-05",
+      );
+
+      expect(metric.totalHours).toBe(150);
+      expect(metric.plannedPercent).toBeCloseTo((100 * 100) / 150, 2);
+      expect(metric.horasQueDeveriamEstar).toBe(100);
+    });
+
+    it("não considera 100% quando a maior parte do subpacote ainda não começou", () => {
+      const services = Array.from({ length: 5 }, (_, index) => ({
+        id: `service-${index}`,
+        folderId: "folder-1",
+        folderName: "Subpacote 1",
+        totalHours: 10,
+        plannedStart: `2025-01-0${index + 3}`,
+        plannedEnd: `2025-01-0${index + 4}`,
+      }));
+
+      const [metric] = calcularMetricasSubpacote(services, "2025-01-05");
+
+      expect(metric.plannedPercent).toBe(40);
+    });
+
+    it("mantém horas sem cronograma no denominador do planejado", () => {
+      const [metric] = calcularMetricasSubpacote(
+        [
+          {
+            id: "service-scheduled",
+            folderId: "folder-1",
+            totalHours: 10,
+            plannedStart: "2025-01-01",
+            plannedEnd: "2025-01-05",
+          },
+          {
+            id: "service-unscheduled",
+            folderId: "folder-1",
+            totalHours: 10,
+          },
+        ],
+        "2025-01-05",
+      );
+
+      expect(metric.totalHours).toBe(20);
+      expect(metric.plannedPercent).toBe(50);
+    });
+
+    it("calcula o planejado com base nas horas e cronogramas sem arredondar internamente", () => {
       const services = Array.from({ length: 120 }, (_, index) => ({
         id: `service-${index}`,
         os: `OS-${index}`,
@@ -67,7 +133,7 @@ describe("serviceProgress utilities", () => {
 
       const [metric] = calcularMetricasSubpacote(services, "2025-01-06");
 
-      expect(metric.plannedPercent).toBe(54.24);
+      expect(metric.plannedPercent).toBe(49.67);
       expect(metric.plannedPercent).not.toBe(Math.round(metric.plannedPercent));
     });
 
@@ -380,10 +446,9 @@ describe("serviceProgress utilities", () => {
         },
         reference,
       );
-      // Contagem inclusiva de dias:
-      // Serviço 1: 01/01..11/01 (11 dias), ref 06/01 => 6/11 = 54.545...
-      // Serviço 2: 01/01..06/01 (6 dias), ref no fim => 100%
-      expect(percentual).toBeCloseTo(((6 / 11) * 100 * 10 + 100 * 5) / 15, 5);
+      // O percentual representa a interpolação entre início (0%) e fim (100%).
+      // Em 06/01: serviço 1 = 50%; serviço 2 = 100%.
+      expect(percentual).toBeCloseTo((50 * 10 + 100 * 5) / 15, 5);
     });
 
     it("clamps the final percentage between 0 and 100", () => {
@@ -430,10 +495,8 @@ describe("serviceProgress utilities", () => {
         reference,
       );
 
-      // Contagem inclusiva de dias:
-      // Serviço 1: 20/11..30/11 (11 dias), ref 24/11 => 5/11 = 45.454...
-      // Serviço 2: 20/11..20/12 (31 dias), ref 24/11 => 5/31 = 16.129...
-      expect(percentual).toBeCloseTo(((5 / 11) * 100 * 10 + (5 / 31) * 100 * 30) / 40, 5);
+      // Em 24/11: serviço 1 = 40%; serviço 2 = 13,33%.
+      expect(percentual).toBeCloseTo((40 * 10 + (4 / 30) * 100 * 30) / 40, 5);
     });
 
     it("applies hour-based weights across subpackages for realized progress", () => {
@@ -755,9 +818,31 @@ describe("serviceProgress utilities", () => {
         }),
       ).toBe("2024-01-07");
       expect(obterPercentual(curvaPlanejada, "2024-01-03T00:00:00Z")).toBeCloseTo(
-        (60 * 10 + 20 * 5) / 15,
+        (50 * 10) / 15,
         1,
       );
+    });
+
+    it("mantém no denominador da curva serviços que ainda não têm cronograma", () => {
+      const curva = calcularCurvaSPlanejada(
+        {
+          subpacotes: [
+            {
+              servicos: [
+                {
+                  horasPrevistas: 10,
+                  dataInicio: "2024-01-01",
+                  dataFim: "2024-01-05",
+                },
+                { horasPrevistas: 10 },
+              ],
+            },
+          ],
+        },
+        "2024-01-05",
+      );
+
+      expect(obterPercentual(curva, "2024-01-05T00:00:00Z")).toBe(50);
     });
 
     it("usa o histórico do Terceiro para calcular a curva realizada", () => {
@@ -772,10 +857,10 @@ describe("serviceProgress utilities", () => {
         new Date("2024-01-05T00:00:00Z"),
       );
       expect(indicadores.planejadoTotal).toBe(100);
-      expect(indicadores.planejadoAteHoje).toBeCloseTo(87, 1);
+      expect(indicadores.planejadoAteHoje).toBe(83);
       // `calcularIndicadoresCurvaS` arredonda os valores consolidados.
       expect(indicadores.realizado).toBe(53);
-      expect(indicadores.diferenca).toBe(-34);
+      expect(indicadores.diferenca).toBe(-30);
     });
 
     it("prioriza reportDate sobre createdAt ao montar a curva realizada", () => {
