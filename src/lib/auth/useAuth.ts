@@ -12,17 +12,45 @@ export function useAuth() {
     const { auth, error } = tryGetAuth();
     if (!auth) {
       if (error) {
-        console.error("[useAuth] Autenticação indisponível", error);
+        console.error("[useAuth] Autenticação de dados indisponível", error);
       }
       setInitializing(false);
       setUser(null);
       return () => {};
     }
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setInitializing(false);
+
+    let active = true;
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        if (active) {
+          setUser(null);
+          setInitializing(false);
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/pcm/session", { cache: "no-store" });
+        if (active) {
+          const session = response.ok
+            ? ((await response.json()) as { authenticated?: boolean })
+            : null;
+          setUser(session?.authenticated ? firebaseUser : null);
+          setInitializing(false);
+        }
+      } catch (sessionError) {
+        console.error("[useAuth] Falha ao verificar sessão PCM", sessionError);
+        if (active) {
+          setUser(null);
+          setInitializing(false);
+        }
+      }
     });
-    return () => unsub();
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   return { user, initializing };

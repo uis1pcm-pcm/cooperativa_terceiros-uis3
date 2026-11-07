@@ -219,12 +219,6 @@ async function findExistingToken(scope: NormalisedScope): Promise<StoredToken | 
   return tokens[0] ?? null;
 }
 
-// Force a fresh ID token after permission-sensitive backend changes so Firestore Rules see updated custom claims.
-function requestClaimsRefresh() {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new Event("pcm:force-token-refresh"));
-}
-
 async function createTokenViaAdmin(scope: NormalisedScope): Promise<string> {
   const { auth, error } = tryGetAuth();
   const user = auth?.currentUser;
@@ -344,7 +338,6 @@ export async function createAccessToken(payload: {
 
   try {
     const token = await createTokenViaAdmin(scope);
-    requestClaimsRefresh();
     return token;
   } catch (error) {
     const status = (error as { status?: number } | null)?.status;

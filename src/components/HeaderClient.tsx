@@ -18,10 +18,14 @@ export default function HeaderClient() {
 
     const { auth, error } = tryGetAuth();
     if (!auth) {
-      console.error("[header] Autenticação indisponível", error);
-      return;
+      if (error) console.error("[header] Autenticação de dados indisponível", error);
+    } else {
+      try {
+        await signOut(auth);
+      } catch (signOutError) {
+        console.error("[header] Falha ao encerrar sessão Firebase", signOutError);
+      }
     }
-    await signOut(auth);
     window.location.href = "/login";
   }
 

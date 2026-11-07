@@ -24,6 +24,12 @@ Configure the following variables before running the API routes that rely on Fir
 - `FIREBASE_CLIENT_EMAIL`
 - `FIREBASE_PRIVATE_KEY` (com `\n` escapados)
 
+### Login PCM
+
+- O login da aplicação valida no servidor somente as credenciais PCM fixas. Após a validação, o cliente usa autenticação anônima do Firebase para continuar acessando o Firestore; habilite o provedor **Anonymous** em Authentication → Sign-in method no Firebase Console.
+- Configure `PCM_SESSION_SECRET` com um segredo aleatório na hospedagem para assinar os cookies de sessão. Se não estiver definido, o sistema usa a senha fixa como segredo.
+- Essa validação protege o fluxo normal da interface, mas não altera as regras do Firestore; elas continuam aceitando qualquer usuário Firebase autenticado, inclusive anônimo.
+
 ### Rede do Firestore em produção
 
 - O arquivo `.env.production` define `NEXT_PUBLIC_FIRESTORE_FORCE_LONG_POLLING=true` e `NEXT_PUBLIC_FIRESTORE_USE_FETCH_STREAMS=false` para garantir que o Firestore use long-polling em ambientes onde WebSockets ou streams não são permitidos.

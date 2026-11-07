@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { signInAnonymously } from "firebase/auth";
 import { tryGetAuth } from "@/lib/firebase";
 
 export const dynamic = "force-dynamic";
@@ -13,89 +13,43 @@ export default function LoginPage() {
   const [pass, setPass] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const { auth: authInstance, error: authError } = useMemo(() => tryGetAuth(), []);
-  const lastLoginEmailStorageKey = "pcm_last_login_email";
-  const lastLoginPassStorageKey = "pcm_last_login_password";
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const savedEmail = window.localStorage.getItem(lastLoginEmailStorageKey);
-      const savedPass = window.localStorage.getItem(lastLoginPassStorageKey);
-
-      if (savedEmail) {
-        setEmail((current) => current || savedEmail);
-      }
-
-      if (savedPass) {
-        setPass((current) => current || savedPass);
-      }
-    } catch (storageError) {
-      console.warn("[login] Falha ao ler último login", storageError);
-    }
-  }, [lastLoginEmailStorageKey, lastLoginPassStorageKey]);
-
-  useEffect(() => {
-    if (authError) {
-      console.error("[login] Falha ao carregar autenticação", authError);
-      setErr("Configuração de login indisponível. Entre em contato com o suporte.");
-    }
-  }, [authError]);
+  const { auth: authInstance } = useMemo(() => tryGetAuth(), []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!authInstance) {
-      setErr("A autenticação não está disponível no momento.");
-      return;
-    }
     setErr(null);
     setLoading(true);
+
     try {
-      const trimmedEmail = email.trim();
-      const credential = await signInWithEmailAndPassword(authInstance, trimmedEmail, pass);
-      // O cookie de sessão do Firebase exige um ID token emitido recentemente.
-      // Forçar o refresh evita erros "id-token-expired" vindos do backend.
-      const idToken = await credential.user.getIdToken(true);
-      let sessionResp: Response;
-      try {
-        sessionResp = await fetch("/api/pcm/session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: idToken }),
-        });
-      } catch (sessionError) {
-        await signOut(authInstance);
-        throw sessionError;
-      }
+      const sessionResp = await fetch("/api/pcm/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password: pass }),
+      });
 
       if (!sessionResp.ok) {
         const data = (await sessionResp.json().catch(() => null)) as { error?: string } | null;
-        const code = data?.error;
-        let message = "Não foi possível iniciar a sessão segura.";
-        if (code === "not_allowed") {
-          message = "Seu usuário não tem acesso ao dashboard PCM.";
-        } else if (code === "admin_not_configured") {
-          message = "Configuração de autenticação indisponível. Tente novamente mais tarde.";
-        } else if (code === "invalid_token") {
-          message = "Credenciais inválidas. Faça login novamente.";
-        }
+        setErr(data?.error ?? "E-mail ou senha inválidos.");
+        return;
+      }
 
-        await signOut(authInstance);
-        setErr(message);
+      if (!authInstance) {
+        await fetch("/api/pcm/session", { method: "DELETE" });
+        setErr("Não foi possível iniciar o acesso aos dados. Contate o suporte.");
         return;
       }
 
       try {
-        window.localStorage.setItem(lastLoginEmailStorageKey, trimmedEmail);
-        window.localStorage.setItem(lastLoginPassStorageKey, pass);
-      } catch (storageError) {
-        console.warn("[login] Não foi possível salvar último login", storageError);
+        await signInAnonymously(authInstance);
+      } catch (firebaseError) {
+        await fetch("/api/pcm/session", { method: "DELETE" });
+        throw firebaseError;
       }
 
       router.replace("/dashboard");
     } catch (error: unknown) {
-      const message = error instanceof Error && error.message ? error.message : "Falha no login";
-      setErr(message);
+      console.error("[login] Falha ao iniciar sessão", error);
+      setErr("Não foi possível entrar. Verifique a conexão e tente novamente.");
     } finally {
       setLoading(false);
     }
@@ -149,7 +103,7 @@ export default function LoginPage() {
           <button
             type="submit"
             className="btn btn-primary h-11 px-5 shadow-md shadow-primary/20 transition-transform hover:-translate-y-[1px]"
-            disabled={loading || !authInstance}
+            disabled={loading}
             aria-busy={loading}
           >
             {loading ? "Entrando..." : "Entrar"}
