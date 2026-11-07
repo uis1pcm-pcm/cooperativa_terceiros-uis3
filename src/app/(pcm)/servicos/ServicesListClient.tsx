@@ -8,7 +8,7 @@ import {
   resolveServicoPercentualPlanejado,
   resolveServicoRealPercent,
 } from "@/lib/serviceProgress";
-import { formatDateTime } from "@/lib/formatDateTime";
+import { formatDate, formatDateTime } from "@/lib/formatDateTime";
 import { resolveReferenceDate } from "@/lib/referenceDate";
 import type { PCMListResponse, PCMServiceListItem } from "@/types/pcm";
 
@@ -50,6 +50,16 @@ function resolveOc(service: PCMServiceListItem) {
 
 function resolveSubtitle(service: PCMServiceListItem) {
   return service.equipmentName || service.equipamento || service.setor || service.sector || "";
+}
+
+function resolvePlannedDate(service: PCMServiceListItem, ...fields: string[]) {
+  for (const field of fields) {
+    const value = service[field];
+    if (typeof value === "string" || typeof value === "number" || value instanceof Date) {
+      return formatDate(value, { timeZone: "America/Sao_Paulo", fallback: "—" });
+    }
+  }
+  return "—";
 }
 
 function resolveCompanyLabel(service: PCMServiceListItem) {
@@ -228,6 +238,22 @@ export default function ServicesListClient({ initialItems, initialCursor }: Prop
           const oc = resolveOc(service);
           const subtitle = resolveSubtitle(service);
           const companyLabel = resolveCompanyLabel(service);
+          const plannedStart = resolvePlannedDate(
+            service,
+            "plannedStart",
+            "inicioPrevisto",
+            "dataInicio",
+            "inicioPlanejado",
+            "startDate",
+          );
+          const plannedEnd = resolvePlannedDate(
+            service,
+            "plannedEnd",
+            "fimPrevisto",
+            "dataFim",
+            "fimPlanejado",
+            "endDate",
+          );
           const lastUpdate = service.updatedAt ?? service.createdAt ?? null;
           const lastUpdateLabel =
             typeof lastUpdate === "number"
@@ -267,6 +293,11 @@ export default function ServicesListClient({ initialItems, initialCursor }: Prop
                     <p className="text-xs text-muted-foreground">
                       Planejado: <span className="font-semibold text-foreground">{plannedPercent}%</span> | Real:{" "}
                       <span className="font-semibold text-foreground">{realPercent}%</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Início: <span className="font-medium text-foreground">{plannedStart}</span>
+                      {" · "}
+                      Fim: <span className="font-medium text-foreground">{plannedEnd}</span>
                     </p>
                   </div>
                 </div>
