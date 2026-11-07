@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { HttpError, requirePcmUser } from "@/app/api/management/tokens/_lib/auth";
 import { recomputeServiceProgress } from "@/lib/progressHistoryServer";
 import { AdminDbUnavailableError } from "@/lib/serverDb";
 import { mapFirestoreError } from "@/lib/utils/firestoreErrors";
@@ -13,6 +14,13 @@ function normaliseServiceId(value: unknown): string | null {
 }
 
 export async function POST(request: NextRequest) {
+  try {
+    await requirePcmUser(request);
+  } catch (error) {
+    const status = error instanceof HttpError ? error.status : 401;
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status });
+  }
+
   let body: RequestBody;
 
   try {
@@ -46,4 +54,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 }
-

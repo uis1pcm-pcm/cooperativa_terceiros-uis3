@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-import { tryGetAuth } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
 import { formatDate, formatDateTime } from "@/lib/formatDateTime";
+import { managementFetch } from "@/lib/managementFetch";
 
 export type FolderSummary = {
   id: string;
@@ -99,32 +99,7 @@ function formatDateTimeLabel(value?: number | null) {
 }
 
 async function authorisedFetch(input: string, init?: RequestInit) {
-  const { auth, error } = tryGetAuth();
-  const user = auth?.currentUser;
-  if (!user) {
-    throw error ?? new Error("Faça login novamente para continuar.");
-  }
-
-  let idToken: string;
-  try {
-    idToken = await user.getIdToken(false);
-  } catch (tokenError) {
-    console.warn("[PackageFoldersManager] Falha ao obter token, tentando refresh", tokenError);
-    try {
-      idToken = await user.getIdToken(true);
-    } catch (refreshError) {
-      console.error("[PackageFoldersManager] Falha ao fazer refresh do token", refreshError);
-      throw new Error("Não foi possível autenticar. Faça login novamente.");
-    }
-  }
-  
-  const headers = new Headers(init?.headers);
-  headers.set("Authorization", `Bearer ${idToken}`);
-  if (init?.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  return fetch(input, { ...init, headers });
+  return managementFetch(input, init);
 }
 
 function buildAccessLink(token?: string | null) {

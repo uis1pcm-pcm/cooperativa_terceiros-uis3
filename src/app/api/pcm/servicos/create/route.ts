@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
 
-import { createAccessToken } from "@/lib/accessTokens";
+import { HttpError, requirePcmUser } from "@/app/api/management/tokens/_lib/auth";
 import { normalizeCnpj } from "@/lib/cnpj";
 import { ensureServiceAccessToken } from "@/lib/repo/accessTokens";
 import { createService } from "@/lib/repo/services";
@@ -118,6 +118,13 @@ function validateRequest(body: Record<string, unknown>): CreateServiceRequest | 
 }
 
 export async function POST(request: Request) {
+  try {
+    await requirePcmUser(request);
+  } catch (error) {
+    const status = error instanceof HttpError ? error.status : 401;
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status });
+  }
+
   let body: Record<string, unknown>;
 
   try {
@@ -142,15 +149,6 @@ export async function POST(request: Request) {
       });
     } catch (adminTokenError) {
       console.error("[api/pcm/servicos/create] Falha ao gerar token via admin", adminTokenError);
-      try {
-        await createAccessToken({
-          serviceId: id,
-          empresa: validated.empresaId ?? undefined,
-          company: validated.empresaId ?? undefined,
-        });
-      } catch (tokenError) {
-        console.error("[api/pcm/servicos/create] Falha ao gerar token (fallback)", tokenError);
-      }
     }
 
     revalidateTag("services:available");

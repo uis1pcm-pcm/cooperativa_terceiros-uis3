@@ -12,7 +12,10 @@ import {
 
 export async function GET() {
   const session = verifyPcmSessionToken(await getPcmSessionCookie());
-  return NextResponse.json({ authenticated: Boolean(session) });
+  return NextResponse.json({
+    authenticated: Boolean(session),
+    email: session?.email ?? null,
+  });
 }
 
 export async function POST(req: Request) {
@@ -26,8 +29,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "E-mail ou senha inválidos." }, { status: 401 });
   }
 
-  await setPcmSessionCookie(createPcmSessionToken(), PCM_SESSION_MAX_AGE_SECONDS);
-  return NextResponse.json({ ok: true });
+  try {
+    await setPcmSessionCookie(createPcmSessionToken(), PCM_SESSION_MAX_AGE_SECONDS);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("[pcm-session] Não foi possível criar a sessão PCM", error);
+    return NextResponse.json(
+      { error: "Configuração de sessão indisponível. Contate o suporte." },
+      { status: 503 },
+    );
+  }
 }
 
 export async function DELETE() {

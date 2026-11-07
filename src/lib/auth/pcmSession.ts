@@ -27,12 +27,19 @@ function safeEqual(left: string, right: string): boolean {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function sessionSecret(): string {
-  return process.env.PCM_SESSION_SECRET || PCM_LOGIN_PASSWORD;
+function sessionSecret(): string | null {
+  return (
+    process.env.PCM_SESSION_SECRET ||
+    process.env.FIREBASE_PRIVATE_KEY ||
+    process.env.FIREBASE_ADMIN_PRIVATE_KEY ||
+    process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 ||
+    process.env.FIREBASE_ADMIN_JSON_BASE64 ||
+    null
+  );
 }
 
-function sign(payload: string): string {
-  return createHmac("sha256", sessionSecret()).update(payload).digest("base64url");
+function sign(payload: string, secret: string): string {
+  return createHmac("sha256", secret).update(payload).digest("base64url");
 }
 
 export function verifyPcmCredentials(email: unknown, password: unknown): boolean {
@@ -45,20 +52,26 @@ export function verifyPcmCredentials(email: unknown, password: unknown): boolean
 }
 
 export function createPcmSessionToken(): string {
+  const secret = sessionSecret();
+  if (!secret) {
+    throw new Error("PCM_SESSION_SECRET_NOT_CONFIGURED");
+  }
   const payload: PcmSessionPayload = {
     email: PCM_LOGIN_EMAIL,
     expiresAt: Math.floor(Date.now() / 1000) + PCM_SESSION_MAX_AGE_SECONDS,
   };
   const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  return `${encodedPayload}.${sign(encodedPayload)}`;
+  return `${encodedPayload}.${sign(encodedPayload, secret)}`;
 }
 
 export function verifyPcmSessionToken(value: string | null | undefined): PcmSessionPayload | null {
   if (!value) return null;
+  const secret = sessionSecret();
+  if (!secret) return null;
   const [encodedPayload, signature, ...rest] = value.split(".");
   if (!encodedPayload || !signature || rest.length > 0) return null;
 
-  const expectedSignature = sign(encodedPayload);
+  const expectedSignature = sign(encodedPayload, secret);
   if (!safeEqual(signature, expectedSignature)) return null;
 
   try {

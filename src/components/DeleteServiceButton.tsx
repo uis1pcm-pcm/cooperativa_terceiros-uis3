@@ -14,8 +14,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { tryGetAuth } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
+import { managementFetch } from "@/lib/managementFetch";
 
 type DeleteServiceButtonProps = {
   serviceId: string;
@@ -39,19 +39,9 @@ export default function DeleteServiceButton({
     setIsDeleting(true);
 
     try {
-      const { auth, error } = tryGetAuth();
-      const user = auth?.currentUser;
-      if (!user) {
-        throw error ?? new Error("Faça login novamente para excluir o serviço.");
-      }
-
-      const idToken = await user.getIdToken();
       const encodedId = encodeURIComponent(serviceId);
-      const response = await fetch(`/api/pcm/servicos/${encodedId}`, {
+      const response = await managementFetch(`/api/pcm/servicos/${encodedId}`, {
         method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-        },
       });
 
       let data: unknown = null;

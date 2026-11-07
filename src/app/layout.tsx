@@ -5,7 +5,6 @@ import SkipToContent from "@/components/SkipToContent";
 import Footer from "@/components/Footer";
 import PreloadAsFix from "@/components/PreloadAsFix";
 import ThemeScript from "@/components/ThemeScript";
-import FirebaseConfigScript from "@/components/FirebaseConfigScript";
 import NetworkBanner from "@/components/NetworkBanner";
 import AppToaster from "@/components/AppToaster";
 
@@ -20,7 +19,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="pt-BR" suppressHydrationWarning>
       <head>
         <ThemeScript />
-        <FirebaseConfigScript />
       </head>
       <body className="relative flex min-h-dvh flex-col bg-background text-foreground">
         <PreloadAsFix />

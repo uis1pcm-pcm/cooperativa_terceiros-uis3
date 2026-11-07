@@ -1,31 +1,9 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { signInAnonymously } from "firebase/auth";
-import { tryGetAuth } from "@/lib/firebase";
 
 export const dynamic = "force-dynamic";
-
-function getFirebaseLoginErrorMessage(error: unknown): string {
-  const code =
-    typeof error === "object" && error !== null && "code" in error &&
-    typeof error.code === "string"
-      ? error.code
-      : null;
-
-  if (code === "auth/network-request-failed") {
-    return "Não foi possível estabelecer uma conexão segura com o Firebase. Verifique a rede, VPN ou proxy; se o erro de certificado persistir, contate o suporte de TI. Não desative a validação de certificados.";
-  }
-  if (code === "auth/operation-not-allowed") {
-    return "O acesso aos dados está indisponível. O provedor de autenticação anônima precisa estar habilitado no Firebase.";
-  }
-  if (code === "auth/unauthorized-domain") {
-    return "Este domínio não está autorizado para autenticação no Firebase. Contate o suporte.";
-  }
-
-  return "Não foi possível iniciar o acesso aos dados. Verifique a conexão e tente novamente.";
-}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -33,7 +11,6 @@ export default function LoginPage() {
   const [pass, setPass] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const { auth: authInstance } = useMemo(() => tryGetAuth(), []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -53,23 +30,10 @@ export default function LoginPage() {
         return;
       }
 
-      if (!authInstance) {
-        await fetch("/api/pcm/session", { method: "DELETE" });
-        setErr("Não foi possível iniciar o acesso aos dados. Contate o suporte.");
-        return;
-      }
-
-      try {
-        await signInAnonymously(authInstance);
-      } catch (firebaseError) {
-        await fetch("/api/pcm/session", { method: "DELETE" });
-        throw firebaseError;
-      }
-
       router.replace("/dashboard");
     } catch (error: unknown) {
       console.error("[login] Falha ao iniciar sessão", error);
-      setErr(getFirebaseLoginErrorMessage(error));
+      setErr("Não foi possível entrar. Verifique a conexão e tente novamente.");
     } finally {
       setLoading(false);
     }
