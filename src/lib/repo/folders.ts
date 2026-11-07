@@ -4,7 +4,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { revalidateTag, unstable_cache } from "next/cache";
 
 import { getAdmin } from "@/lib/firebaseAdmin";
-import { randomToken } from "@/lib/accessTokens";
+import { randomToken } from "@/lib/repo/accessTokens";
 import type { PackageFolder } from "@/types";
 import { collectFolderServiceIds } from "@/lib/folderServices";
 import { buildServiceAssignmentFields } from "@/lib/serviceAssignment";

@@ -1,25 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { ArrowLeft, CheckCircle2, Download, Loader2, Pencil, Trash2 } from "lucide-react";
-import {
-  collection,
-  doc,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  type FirestoreError,
-} from "firebase/firestore";
 import SCurveDeferred from "@/components/SCurveDeferred";
 import { plannedCurve } from "@/lib/curve";
 import { resolveReferenceDate } from "@/lib/referenceDate";
 import { resolveServicoPercentualPlanejado } from "@/lib/serviceProgress";
-import { isFirestoreLongPollingForced, tryGetFirestore } from "@/lib/firebase";
-import { isConnectionResetError } from "@/lib/networkErrors";
 import { cn } from "@/lib/utils";
 import { useFirebaseAuthSession } from "@/lib/useFirebaseAuthSession";
 import type { ChecklistItem, Service, ServiceUpdate } from "@/lib/types";
@@ -34,9 +23,6 @@ import {
   formatDateTime,
   formatUpdateSummary,
   filterUpdatesWithRelevantContent,
-  mapChecklistSnapshot,
-  mapServiceSnapshot,
-  mapUpdateSnapshot,
   mergeServiceRealtime,
   normaliseStatus,
   resolveUpdateTimestamp,
@@ -52,9 +38,6 @@ const DeleteServiceButton = dynamic(() => import("@/components/DeleteServiceButt
     </button>
   ),
 });
-
-const CONNECTION_RESET_FRIENDLY_MESSAGE =
-  "A conexão com os serviços do Firebase foi resetada. Tentaremos reconectar automaticamente. Caso o problema persista, libere o acesso a firestore.googleapis.com e identitytoolkit.googleapis.com no firewall/proxy.";
 
 type ServiceDetailClientProps = {
   serviceId: string;
@@ -164,15 +147,10 @@ export default function ServiceDetailClient({
   const [checklist, setChecklist] = useState<ChecklistItem[]>(toNewChecklist(initialChecklist));
   const [updates, setUpdates] = useState<ServiceUpdate[]>(toNewUpdates(initialUpdates));
   const [connectionIssue, setConnectionIssue] = useState<string | null>(null);
-  const [isRealtimeFromCache, setIsRealtimeFromCache] = useState(false);
   const [currentToken, setCurrentToken] = useState<ServiceDetailClientProps["latestToken"]>(latestToken);
   const [currentTokenLink, setCurrentTokenLink] = useState<string | null>(tokenLink);
   const normalizedInitialUpdates = useMemo(() => toNewUpdates(initialUpdates), [initialUpdates]);
-  const longPollingForced = isFirestoreLongPollingForced;
   const { ready: isAuthReady, issue: authIssue, user } = useFirebaseAuthSession();
-  const latestIdTokenRef = useRef<string | null>(null);
-  const retryTimeoutRef = useRef<number | null>(null);
-  const retryCountRef = useRef(0);
   const [isCompleting, setIsCompleting] = useState(false);
   const [removingEvidenceKey, setRemovingEvidenceKey] = useState<string | null>(null);
 
@@ -183,62 +161,15 @@ export default function ServiceDetailClient({
 
   useEffect(() => {
     let cancelled = false;
-    const unsubscribers: Array<() => void> = [];
-    let fallbackRunning = false;
+    let loading = false;
 
-    const clearRealtimeListeners = () => {
-      while (unsubscribers.length) {
-        const unsubscribe = unsubscribers.pop();
-        if (!unsubscribe) continue;
-        try {
-          unsubscribe();
-        } catch (unsubscribeError) {
-          console.warn("[service-detail] Falha ao cancelar listener", unsubscribeError);
-        }
-      }
-    };
-
-    const scheduleReconnect = (reason: string) => {
-      if (cancelled) return;
-      if (retryTimeoutRef.current !== null) return;
-      if (retryCountRef.current >= 2) {
-        console.warn(
-          `[service-detail] Limite de tentativas de reconexão atingido para ${serviceId} (motivo: ${reason}).`,
-        );
-        return;
-      }
-      retryCountRef.current += 1;
-      const delayMs = 4000;
-      console.info(
-        `[service-detail] Tentando reconectar ao Firestore em ${delayMs}ms (motivo: ${reason}).`,
-      );
-      retryTimeoutRef.current = window.setTimeout(() => {
-        retryTimeoutRef.current = null;
-        if (cancelled) return;
-        clearRealtimeListeners();
-        void bootstrapRealtime(true);
-      }, delayMs);
-    };
-
-    const fetchFallbackFromServer = async (options?: { message?: string }) => {
-      if (fallbackRunning) return;
-      fallbackRunning = true;
+    const refreshFromServer = async () => {
+      if (loading || !isAuthReady || !user) return;
+      loading = true;
       try {
-        let tokenCandidate = latestIdTokenRef.current;
-        if (!tokenCandidate && user) {
-          try {
-            tokenCandidate = await user.getIdToken();
-            latestIdTokenRef.current = tokenCandidate;
-          } catch {
-            tokenCandidate = null;
-          }
-        }
-        const headers: HeadersInit = tokenCandidate
-          ? { Authorization: `Bearer ${tokenCandidate}` }
-          : {};
         const response = await fetch(`/api/pcm/servicos/${encodedServiceId}/fallback`, {
-          headers,
           cache: "no-store",
+          credentials: "same-origin",
         });
         const json = (await response.json().catch(() => null)) as
           | ServiceFallbackSuccess
@@ -255,6 +186,11 @@ export default function ServiceDetailClient({
             status: response.status,
             reason,
           });
+          setConnectionIssue(
+            response.status === 401 || response.status === 403
+              ? "Sua sessão expirou. Faça login novamente."
+              : "Não foi possível atualizar os dados do serviço. Tentaremos novamente.",
+          );
           return;
         }
 
@@ -266,209 +202,23 @@ export default function ServiceDetailClient({
         setCurrentTokenLink(
           json.latestToken ? `/acesso?token=${encodeURIComponent(json.latestToken.code)}` : null,
         );
-        setConnectionIssue(
-          options?.message ??
-            "Sincronização em tempo real não disponível; exibindo dados atualizados do servidor.",
-        );
+        setConnectionIssue(null);
       } catch (error) {
         if (cancelled) return;
-        if (isConnectionResetError(error)) {
-          console.warn(
-            `[service-detail] Fallback indisponível devido a ERR_CONNECTION_RESET (${serviceId})`,
-            error,
-          );
-          setConnectionIssue(CONNECTION_RESET_FRIENDLY_MESSAGE);
-          scheduleReconnect("fallback-connection-reset");
-        } else {
-          console.error(
-            `[service-detail] Falha ao carregar fallback do serviço ${serviceId}`,
-            error,
-          );
-        }
+        console.error(`[service-detail] Falha ao carregar dados do servidor para ${serviceId}`, error);
+        setConnectionIssue("Não foi possível atualizar os dados do serviço. Tentaremos novamente.");
       } finally {
-        fallbackRunning = false;
+        loading = false;
       }
     };
 
-    async function bootstrapRealtime(isRetry = false) {
-      if (!isAuthReady || !user) {
-        setConnectionIssue(null);
-        return;
-      }
-
-      if (typeof navigator !== "undefined" && navigator.onLine === false) {
-        setConnectionIssue("Sem conexão com a internet. Aguardando restabelecimento para sincronizar.");
-        return;
-      }
-
-      try {
-        const token = await user.getIdToken();
-        if (cancelled) return;
-        latestIdTokenRef.current = token;
-      } catch (tokenError) {
-        if (cancelled) return;
-        if (isConnectionResetError(tokenError)) {
-          console.warn(
-            `[service-detail] ERR_CONNECTION_RESET ao obter idToken para ${serviceId}`,
-            tokenError,
-          );
-          setConnectionIssue(CONNECTION_RESET_FRIENDLY_MESSAGE);
-          scheduleReconnect("auth-connection-reset");
-        } else {
-          console.error(
-            `[service-detail] Falha ao obter idToken antes de iniciar listeners do serviço ${serviceId}`,
-            tokenError,
-          );
-          setConnectionIssue(
-            "Não foi possível validar sua sessão segura. Atualize a página ou faça login novamente.",
-          );
-        }
-        return;
-      }
-
-      const { db, error } = tryGetFirestore();
-      if (!db) {
-        if (error) {
-          console.warn("[service-detail] Firestore indisponível", error);
-        }
-        const hint = longPollingForced
-          ? "Conexão com o Firestore indisponível. Continuaremos tentando via long-polling."
-          : "Conexão indisponível. Considere ativar long-polling.";
-        setConnectionIssue(hint);
-        return;
-      }
-
-      const serviceRef = doc(db, "services", serviceId);
-
-      const handleError = (firestoreError: FirestoreError) => {
-        if (cancelled) return;
-        if (firestoreError.code === "permission-denied") {
-          console.warn(
-            `[service-detail] Usuário sem permissão para sincronização em tempo real do serviço ${serviceId}`,
-            firestoreError,
-          );
-          setConnectionIssue("Sincronização em tempo real não disponível para este usuário.");
-          void fetchFallbackFromServer();
-          return;
-        }
-
-        if (isConnectionResetError(firestoreError)) {
-          console.warn(
-            `[service-detail] Listener interrompido por ERR_CONNECTION_RESET (${serviceId})`,
-            firestoreError,
-          );
-          setConnectionIssue(CONNECTION_RESET_FRIENDLY_MESSAGE);
-          void fetchFallbackFromServer({ message: CONNECTION_RESET_FRIENDLY_MESSAGE });
-          scheduleReconnect("firestore-connection-reset");
-          return;
-        }
-
-        const message =
-          firestoreError.code === "unavailable"
-            ? longPollingForced
-              ? "Conexão com o Firestore indisponível. Continuaremos tentando via long-polling."
-              : "Conexão indisponível. Considere ativar long-polling."
-            : "Não foi possível sincronizar com o Firestore. Tentaremos novamente.";
-        console.warn(`[service-detail] Falha na escuta do serviço ${serviceId}`, firestoreError);
-        setConnectionIssue(message);
-        if (firestoreError.code === "unavailable") {
-          scheduleReconnect("firestore-unavailable");
-        }
-      };
-
-      if (isRetry) {
-        clearRealtimeListeners();
-      }
-
-      unsubscribers.push(
-        onSnapshot(
-          serviceRef,
-          { includeMetadataChanges: true },
-          (snapshot) => {
-            if (cancelled) return;
-            setIsRealtimeFromCache(snapshot.metadata.fromCache);
-            const mapped = mapServiceSnapshot(snapshot);
-            setService((current) => mergeServiceRealtime(current, mapped));
-            setConnectionIssue(null);
-            retryCountRef.current = 0;
-            if (retryTimeoutRef.current !== null) {
-              clearTimeout(retryTimeoutRef.current);
-              retryTimeoutRef.current = null;
-            }
-          },
-          handleError,
-        ),
-      );
-
-      unsubscribers.push(
-        onSnapshot(
-          query(collection(serviceRef, "updates"), orderBy("audit.submittedAt", "desc"), limit(100)),
-          { includeMetadataChanges: true },
-          (snapshot) => {
-            if (cancelled) return;
-            setIsRealtimeFromCache(snapshot.metadata.fromCache);
-            const mapped = snapshot.docs.map((docSnap) => mapUpdateSnapshot(docSnap));
-            setUpdates(toNewUpdates(mapped));
-            setConnectionIssue(null);
-            retryCountRef.current = 0;
-            if (retryTimeoutRef.current !== null) {
-              clearTimeout(retryTimeoutRef.current);
-              retryTimeoutRef.current = null;
-            }
-          },
-          handleError,
-        ),
-      );
-
-      unsubscribers.push(
-        onSnapshot(
-          query(collection(serviceRef, "checklist"), orderBy("description", "asc")),
-          { includeMetadataChanges: true },
-          (snapshot) => {
-            if (cancelled) return;
-            setIsRealtimeFromCache(snapshot.metadata.fromCache);
-            const mapped = snapshot.docs.map((docSnap) => mapChecklistSnapshot(docSnap));
-            setChecklist(toNewChecklist(mapped));
-            setConnectionIssue(null);
-            retryCountRef.current = 0;
-            if (retryTimeoutRef.current !== null) {
-              clearTimeout(retryTimeoutRef.current);
-              retryTimeoutRef.current = null;
-            }
-          },
-          handleError,
-        ),
-      );
-
-      // Lançamentos antigos ainda podem estar na coleção legada. Uma edição nela
-      // também precisa atualizar imediatamente gráfico, indicadores e andamento.
-      unsubscribers.push(
-        onSnapshot(
-          query(collection(serviceRef, "serviceUpdates"), orderBy("date", "desc"), limit(100)),
-          () => {
-            if (!cancelled) void fetchFallbackFromServer();
-          },
-          handleError,
-        ),
-      );
-    }
-
-    void bootstrapRealtime();
-
+    void refreshFromServer();
+    const intervalId = window.setInterval(() => void refreshFromServer(), 30_000);
     return () => {
       cancelled = true;
-      clearRealtimeListeners();
-      if (retryTimeoutRef.current !== null) {
-        clearTimeout(retryTimeoutRef.current);
-        retryTimeoutRef.current = null;
-      }
+      window.clearInterval(intervalId);
     };
-  }, [
-    serviceId,
-    longPollingForced,
-    isAuthReady,
-    user,
-  ]);
+  }, [encodedServiceId, isAuthReady, user]);
 
   const planned = useMemo(() => {
     const start = service.plannedStart ?? composedInitial.plannedStart;
@@ -645,19 +395,9 @@ export default function ServiceDetailClient({
 
     setIsCompleting(true);
     try {
-      let token = latestIdTokenRef.current;
-      if (!token && user) {
-        token = await user.getIdToken().catch(() => null);
-        latestIdTokenRef.current = token ?? null;
-      }
-
-      if (!token) {
-        throw new Error("Não foi possível validar sua sessão PCM.");
-      }
-
       const response = await fetch(`/api/public/service/complete?serviceId=${encodedServiceId}`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "same-origin",
       });
 
       const json = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
@@ -704,14 +444,7 @@ export default function ServiceDetailClient({
     } finally {
       setIsCompleting(false);
     }
-  }, [
-    encodedServiceId,
-    isCompleting,
-    isServiceConcluded,
-    realizedPercent,
-    serviceId,
-    user,
-  ]);
+  }, [encodedServiceId, isCompleting, isServiceConcluded, realizedPercent, serviceId, user]);
 
   const recentChecklist = useMemo(
     () =>
@@ -769,12 +502,6 @@ export default function ServiceDetailClient({
       {authIssue || connectionIssue ? (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
           {authIssue ?? connectionIssue}
-        </div>
-      ) : null}
-
-      {isRealtimeFromCache ? (
-        <div className="rounded-md border border-sky-200 bg-sky-50 p-3 text-xs text-sky-700">
-          Exibindo dados salvos localmente. A tela será atualizada automaticamente quando a conexão com o servidor for confirmada.
         </div>
       ) : null}
 

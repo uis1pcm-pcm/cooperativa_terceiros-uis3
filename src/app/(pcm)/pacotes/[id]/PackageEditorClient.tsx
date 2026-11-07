@@ -6,8 +6,8 @@ import { toast } from "sonner";
 
 import { Field, FormRow } from "@/components/ui/form-controls";
 import { parseDateOnly, dateOnlyToMillis, formatDateOnly, formatDateOnlyBR, maskDateOnlyInput } from "@/lib/dateOnly";
-import { tryGetAuth } from "@/lib/firebase";
 import { useFirebaseAuthSession } from "@/lib/useFirebaseAuthSession";
+import { managementFetch } from "@/lib/managementFetch";
 import type { Package } from "@/types";
 import PackageImportServicesButton from "./PackageImportServicesButton";
 
@@ -111,16 +111,8 @@ export default function PackageEditorClient({ packageId, initialPackage }: Packa
       return;
     }
 
-    const { auth, error } = tryGetAuth();
-    const user = auth?.currentUser;
-    if (!user) {
-      toast.error(error?.message ?? "Faça login novamente para salvar o pacote.");
-      return;
-    }
-
     setSaving(true);
     try {
-      const idToken = await user.getIdToken();
       const payload = {
         name: form.name.trim(),
         code: form.code.trim() || null,
@@ -130,12 +122,8 @@ export default function PackageEditorClient({ packageId, initialPackage }: Packa
         status: form.status,
       };
 
-      const response = await fetch(`/api/pcm/packages/${encodedPackageId}`, {
+      const response = await managementFetch(`/api/pcm/packages/${encodedPackageId}`, {
         method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify(payload),
       });
 

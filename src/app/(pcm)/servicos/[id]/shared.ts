@@ -145,8 +145,8 @@ function pickDateField(data: ServiceRecord, keys: string[]): string | null {
 }
 
 export function composeServiceRealtimeData(
-  primary: Partial<Service> | null | undefined,
-  fallback?: Partial<Service> | null,
+  primary: Partial<Service> | Partial<ServiceRealtimeData> | null | undefined,
+  fallback?: Partial<Service> | Partial<ServiceRealtimeData> | null,
 ): ServiceRealtimeData {
   const base: ServiceRealtimeData = {
     id: String(primary?.id ?? fallback?.id ?? ""),

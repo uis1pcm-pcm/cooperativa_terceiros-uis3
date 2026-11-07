@@ -2,9 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { onAuthStateChanged } from "firebase/auth";
-
-import { tryGetAuth } from "@/lib/firebase";
+import { useAuth } from "@/lib/auth/useAuth";
 
 type PcmGuardProps = {
   allowlist?: string;
@@ -24,45 +22,19 @@ function parseAllowlist(rawValue: string | undefined): string[] {
 export default function PcmGuard({ children, allowlist }: PcmGuardProps) {
   const normalizedAllowlist = useMemo(() => parseAllowlist(allowlist), [allowlist]);
   const [state, setState] = useState<GuardState>("loading");
-  const { auth: authInstance, error: authError } = useMemo(() => tryGetAuth(), []);
+  const { user, initializing } = useAuth();
 
   useEffect(() => {
-    if (authError) {
-      console.error("[pcm-guard] Falha ao inicializar autenticação do Firebase", authError);
+    if (initializing) return;
+    if (!user) {
       setState("unauthenticated");
+      return;
     }
-  }, [authError]);
 
-  useEffect(() => {
-    if (!authInstance) return;
-
-    const unsubscribe = onAuthStateChanged(authInstance, (user) => {
-      if (!user) {
-        setState("unauthenticated");
-        return;
-      }
-
-      const email = user.email?.trim().toLowerCase();
-      if (!email || !normalizedAllowlist.includes(email)) {
-        setState("unauthorized");
-        return;
-      }
-
-      setState("authorized");
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [authInstance, normalizedAllowlist]);
-
-  if (!authInstance) {
-    return (
-      <div className="p-6 text-sm text-amber-600">
-        A autenticação não pôde ser carregada. Entre em contato com o suporte.
-      </div>
-    );
-  }
+    const email = user.email?.trim().toLowerCase();
+    const allowed = user.isAnonymous || Boolean(email && normalizedAllowlist.includes(email));
+    setState(allowed ? "authorized" : "unauthorized");
+  }, [initializing, normalizedAllowlist, user]);
 
   if (state === "loading") {
     return <div className="p-6 text-sm text-gray-500">Carregando…</div>;

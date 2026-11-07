@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { createAccessToken } from "@/lib/accessTokens";
+import { HttpError, requirePcmUser } from "@/app/api/management/tokens/_lib/auth";
+import { ensureServiceAccessToken } from "@/lib/repo/accessTokens";
+import { getPackageFolder } from "@/lib/repo/folders";
 
 export async function POST(req: NextRequest) {
   try {
+    await requirePcmUser(req);
     const body = await req.json();
 
     if (!body?.scope) return NextResponse.json({ ok: false, error: "missing_scope" }, { status: 400 });
@@ -28,9 +31,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "unsupported_scope" }, { status: 400 });
     }
 
-    const token = await createAccessToken({ serviceId, folderId, packageId, empresa });
+    let token: string | null = null;
+    if (serviceId) {
+      token = (await ensureServiceAccessToken({ serviceId, company: empresa }))?.code ?? null;
+    } else if (folderId) {
+      const folder = await getPackageFolder(folderId);
+      token = folder?.tokenCode ?? null;
+      if (folder && packageId && folder.packageId !== packageId) {
+        return NextResponse.json({ ok: false, error: "folder_package_mismatch" }, { status: 403 });
+      }
+    }
+    if (!token) {
+      return NextResponse.json({ ok: false, error: "token_unavailable" }, { status: 404 });
+    }
     return NextResponse.json({ ok: true, token });
   } catch (error) {
+    if (error instanceof HttpError) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: error.status });
+    }
     console.error("[tokens/issue]", error);
     return NextResponse.json({ ok: false, error: "server_error" }, { status: 500 });
   }

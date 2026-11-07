@@ -84,10 +84,6 @@ export async function GET(
   }
 
   const bearerToken = extractBearerToken(req);
-  if (!bearerToken) {
-    return NextResponse.json({ ok: false, error: "missing_authorization" }, { status: 401 });
-  }
-
   let authorized = false;
 
   try {
@@ -95,9 +91,11 @@ export async function GET(
     authorized = true;
   } catch (error) {
     if (error instanceof HttpError && (error.status === 401 || error.status === 403)) {
-      for (const candidate of serviceIdCandidates) {
-        authorized = await ensureThirdPartyAccess(bearerToken, candidate);
-        if (authorized) break;
+      if (bearerToken) {
+        for (const candidate of serviceIdCandidates) {
+          authorized = await ensureThirdPartyAccess(bearerToken, candidate);
+          if (authorized) break;
+        }
       }
       if (!authorized) {
         return NextResponse.json({ ok: false, error: "not_allowed" }, { status: 403 });

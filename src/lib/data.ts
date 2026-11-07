@@ -2,6 +2,7 @@ import "server-only";
 import { FieldPath, Timestamp, type Query, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { getAdminDbOrThrow } from "@/lib/serverDb";
 import { serviceSearchMatches } from "@/lib/serviceSearch";
+import { serviceIntersectsDateRange } from "@/lib/serviceDateRange";
 import type { PCMPackageListItem, PCMListResponse, PCMServiceListItem } from "@/types/pcm";
 
 // Normaliza status (aceita "ABERTO", "aberto", etc.)
@@ -245,6 +246,8 @@ export async function listServicesPCM(options?: {
   status?: string | null;
   empresa?: string | null;
   search?: string | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
 }): Promise<PCMListResponse<PCMServiceListItem>> {
   try {
     const admin = getAdminDbOrThrow();
@@ -254,6 +257,8 @@ export async function listServicesPCM(options?: {
       status,
       empresa,
       search,
+      dateFrom,
+      dateTo,
     } = options ?? {};
     const searchTerm = search?.trim() ?? "";
 
@@ -265,6 +270,57 @@ export async function listServicesPCM(options?: {
 
     if (empresa) {
       query = query.where("empresa", "==", empresa);
+    }
+
+    if (dateFrom && dateTo) {
+      const decoded = cursor ? decodeCursor(cursor) : null;
+      let scanQuery = query.orderBy("updatedAt", "desc").orderBy(FieldPath.documentId(), "desc");
+      if (decoded) scanQuery = scanQuery.startAfter(Timestamp.fromMillis(decoded.updatedAt), decoded.id);
+
+      const items: PCMServiceListItem[] = [];
+      let scanCursor = decoded;
+      let hasMore = false;
+      const scanLimit = 100;
+
+      while (items.length < limit) {
+        let pageQuery = scanQuery.limit(scanLimit);
+        if (scanCursor) {
+          pageQuery = query
+            .orderBy("updatedAt", "desc")
+            .orderBy(FieldPath.documentId(), "desc")
+            .startAfter(Timestamp.fromMillis(scanCursor.updatedAt), scanCursor.id)
+            .limit(scanLimit);
+        }
+
+        const page = await pageQuery.get();
+        if (page.empty) {
+          hasMore = false;
+          break;
+        }
+
+        for (const docSnap of page.docs) {
+          const data = (docSnap.data() ?? {}) as Record<string, unknown>;
+          scanCursor = {
+            updatedAt: toTimestamp(docSnap.get("updatedAt")) ?? 0,
+            id: docSnap.id,
+          };
+          if (
+            (!searchTerm || serviceSearchMatches(docSnap.id, data, searchTerm)) &&
+            serviceIntersectsDateRange(data, dateFrom, dateTo)
+          ) {
+            items.push(mapDoc(docSnap.id, data));
+            if (items.length >= limit) break;
+          }
+        }
+
+        hasMore = page.size === scanLimit;
+        if (items.length >= limit || !hasMore) break;
+      }
+
+      return {
+        items,
+        nextCursor: hasMore && scanCursor ? encodeCursor(scanCursor) : null,
+      };
     }
 
     if (searchTerm) {

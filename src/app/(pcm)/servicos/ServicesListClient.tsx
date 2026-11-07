@@ -8,7 +8,7 @@ import {
   resolveServicoPercentualPlanejado,
   resolveServicoRealPercent,
 } from "@/lib/serviceProgress";
-import { formatDateTime } from "@/lib/formatDateTime";
+import { formatDate, formatDateTime } from "@/lib/formatDateTime";
 import { resolveReferenceDate } from "@/lib/referenceDate";
 import type { PCMListResponse, PCMServiceListItem } from "@/types/pcm";
 
@@ -50,6 +50,16 @@ function resolveOc(service: PCMServiceListItem) {
 
 function resolveSubtitle(service: PCMServiceListItem) {
   return service.equipmentName || service.equipamento || service.setor || service.sector || "";
+}
+
+function resolvePlannedDate(service: PCMServiceListItem, ...fields: string[]) {
+  for (const field of fields) {
+    const value = service[field];
+    if (typeof value === "string" || typeof value === "number" || value instanceof Date) {
+      return formatDate(value, { timeZone: "America/Sao_Paulo", fallback: "—" });
+    }
+  }
+  return "—";
 }
 
 function resolveCompanyLabel(service: PCMServiceListItem) {
@@ -117,14 +127,24 @@ export default function ServicesListClient({ initialItems, initialCursor }: Prop
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [osFilter, setOsFilter] = useState("");
   const [searchItems, setSearchItems] = useState<PCMServiceListItem[] | null>(null);
+  const [dateRangeItems, setDateRangeItems] = useState<PCMServiceListItem[] | null>(null);
+  const [dateRangeCursor, setDateRangeCursor] = useState<string | null>(null);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  const [isFilteringDates, setIsFilteringDates] = useState(false);
   const searchParams = useSearchParams();
   const refDateParam = searchParams?.get("refDate") ?? null;
   const { date: referenceDate } = useMemo(() => resolveReferenceDate(refDateParam), [refDateParam]);
-  const filteredItems = searchItems ?? items;
+  const filteredItems = dateRangeItems ?? searchItems ?? items;
 
   useEffect(() => {
     const query = osFilter.trim();
+    if (dateFrom && dateTo) {
+      setSearchItems(null);
+      setIsSearching(false);
+      return;
+    }
     if (!query) {
       setSearchItems(null);
       setIsSearching(false);
@@ -163,9 +183,98 @@ export default function ServicesListClient({ initialItems, initialCursor }: Prop
       controller.abort();
       window.clearTimeout(timeout);
     };
-  }, [osFilter]);
+  }, [dateFrom, dateTo, osFilter]);
+
+  useEffect(() => {
+    if (!dateFrom || !dateTo) {
+      setDateRangeItems(null);
+      setDateRangeCursor(null);
+      setIsFilteringDates(false);
+      setErrorMessage(null);
+      return;
+    }
+
+    setDateRangeItems([]);
+    setDateRangeCursor(null);
+    if (dateFrom > dateTo) {
+      setIsFilteringDates(false);
+      setErrorMessage("A data inicial deve ser anterior ou igual à data final.");
+      return;
+    }
+
+    setIsFilteringDates(true);
+    setErrorMessage(null);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setIsFilteringDates(true);
+      setErrorMessage(null);
+      try {
+        const params = new URLSearchParams({
+          limit: "50",
+          dateFrom,
+          dateTo,
+        });
+        const query = osFilter.trim();
+        if (query) params.set("q", query);
+        const response = await fetch(`/api/pcm/servicos?${params.toString()}`, {
+          method: "GET",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`Falha ao filtrar serviços por data: ${response.status}`);
+        }
+        const payload = (await response.json()) as PCMListResponse<PCMServiceListItem>;
+        setDateRangeItems(payload.items);
+        setDateRangeCursor(payload.nextCursor ?? null);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        console.error("[ServicesListClient] Falha ao filtrar serviços por data", error);
+        setErrorMessage("Não foi possível filtrar por data. Tente novamente.");
+        setDateRangeItems([]);
+      } finally {
+        if (!controller.signal.aborted) setIsFilteringDates(false);
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [dateFrom, dateTo, osFilter]);
 
   const handleLoadMore = useCallback(async () => {
+    if (dateRangeItems !== null && dateFrom && dateTo && dateRangeCursor) {
+      setIsLoadingMore(true);
+      setErrorMessage(null);
+      try {
+        const params = new URLSearchParams({
+          limit: "50",
+          dateFrom,
+          dateTo,
+          cursor: dateRangeCursor,
+        });
+        const query = osFilter.trim();
+        if (query) params.set("q", query);
+        const response = await fetch(`/api/pcm/servicos?${params.toString()}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          throw new Error(`Falha ao carregar mais serviços: ${response.status}`);
+        }
+        const payload = (await response.json()) as PCMListResponse<PCMServiceListItem>;
+        setDateRangeItems((previous) => [...(previous ?? []), ...payload.items]);
+        setDateRangeCursor(payload.nextCursor ?? null);
+      } catch (error) {
+        console.error("[ServicesListClient] Falha ao carregar serviços filtrados", error);
+        setErrorMessage("Não foi possível carregar mais serviços. Tente novamente.");
+      } finally {
+        setIsLoadingMore(false);
+      }
+      return;
+    }
+
     if (!cursor) return;
     setIsLoadingMore(true);
     setErrorMessage(null);
@@ -187,11 +296,7 @@ export default function ServicesListClient({ initialItems, initialCursor }: Prop
     } finally {
       setIsLoadingMore(false);
     }
-  }, [cursor]);
-
-  if (items.length === 0) {
-    return null;
-  }
+  }, [cursor, dateFrom, dateRangeCursor, dateRangeItems, dateTo, osFilter]);
 
   return (
     <div className="space-y-4">
@@ -209,11 +314,61 @@ export default function ServicesListClient({ initialItems, initialCursor }: Prop
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm shadow-sm focus-visible:ring-2 focus-visible:ring-primary/40"
           />
         </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1 text-sm">
+            <label
+              className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              htmlFor="service-date-from"
+            >
+              Início do período
+            </label>
+            <input
+              id="service-date-from"
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm shadow-sm focus-visible:ring-2 focus-visible:ring-primary/40"
+            />
+          </div>
+          <div className="space-y-1 text-sm">
+            <label
+              className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              htmlFor="service-date-to"
+            >
+              Fim do período
+            </label>
+            <input
+              id="service-date-to"
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              className="rounded-md border border-border bg-background px-3 py-2 text-sm shadow-sm focus-visible:ring-2 focus-visible:ring-primary/40"
+            />
+          </div>
+          {dateFrom || dateTo ? (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setDateFrom("");
+                setDateTo("");
+              }}
+            >
+              Limpar datas
+            </button>
+          ) : null}
+        </div>
       </div>
 
-      {filteredItems.length === 0 ? (
+      {isFilteringDates ? (
         <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-          Nenhum serviço encontrado para a busca informada.
+          Filtrando serviços pelo período...
+        </div>
+      ) : filteredItems.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
+          {dateRangeItems !== null
+            ? "Nenhum serviço encontrado no período informado."
+            : "Nenhum serviço encontrado para a busca informada."}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -228,6 +383,22 @@ export default function ServicesListClient({ initialItems, initialCursor }: Prop
           const oc = resolveOc(service);
           const subtitle = resolveSubtitle(service);
           const companyLabel = resolveCompanyLabel(service);
+          const plannedStart = resolvePlannedDate(
+            service,
+            "plannedStart",
+            "inicioPrevisto",
+            "dataInicio",
+            "inicioPlanejado",
+            "startDate",
+          );
+          const plannedEnd = resolvePlannedDate(
+            service,
+            "plannedEnd",
+            "fimPrevisto",
+            "dataFim",
+            "fimPlanejado",
+            "endDate",
+          );
           const lastUpdate = service.updatedAt ?? service.createdAt ?? null;
           const lastUpdateLabel =
             typeof lastUpdate === "number"
@@ -268,6 +439,11 @@ export default function ServicesListClient({ initialItems, initialCursor }: Prop
                       Planejado: <span className="font-semibold text-foreground">{plannedPercent}%</span> | Real:{" "}
                       <span className="font-semibold text-foreground">{realPercent}%</span>
                     </p>
+                    <p className="text-xs text-muted-foreground">
+                      Início: <span className="font-medium text-foreground">{plannedStart}</span>
+                      {" · "}
+                      Fim: <span className="font-medium text-foreground">{plannedEnd}</span>
+                    </p>
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -303,10 +479,23 @@ export default function ServicesListClient({ initialItems, initialCursor }: Prop
         <button
           type="button"
           className="btn btn-secondary"
-          disabled={Boolean(osFilter.trim()) || !cursor || isLoadingMore}
+          disabled={
+            isLoadingMore ||
+            (dateRangeItems !== null
+              ? !dateRangeCursor || isFilteringDates
+              : Boolean(osFilter.trim()) || !cursor)
+          }
           onClick={handleLoadMore}
         >
-          {isLoadingMore ? "Carregando..." : cursor ? "Carregar mais" : "Todos carregados"}
+          {isLoadingMore
+            ? "Carregando..."
+            : dateRangeItems !== null
+              ? dateRangeCursor
+                ? "Carregar mais"
+                : "Todos carregados"
+              : cursor
+                ? "Carregar mais"
+                : "Todos carregados"}
         </button>
       </div>
     </div>

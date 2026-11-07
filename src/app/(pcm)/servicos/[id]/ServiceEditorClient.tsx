@@ -3,23 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import {
-  Timestamp,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
-} from "firebase/firestore";
-
 import { Field, FormRow } from "@/components/ui/form-controls";
 import { maskCnpjInput } from "@/lib/cnpj";
 import { dateOnlyToMillis, formatDateOnlyBR, maskDateOnlyInput, parseDateOnly } from "@/lib/dateOnly";
-import { tryGetFirestore } from "@/lib/firebase";
 import { useFirebaseAuthSession } from "@/lib/useFirebaseAuthSession";
 import { recordTelemetry } from "@/lib/telemetry";
 import { resolveReopenedProgress, snapshotBeforeConclusion } from "@/lib/serviceProgress";
@@ -109,15 +95,6 @@ function normaliseChecklistEntry(entry: unknown, index: number): ChecklistDraft[
 
 function toDateInput(value: unknown): string {
   if (!value) return "";
-  if (value instanceof Timestamp) {
-    const date = value.toDate();
-    if (!date || Number.isNaN(date.getTime())) return "";
-    return formatDateOnlyBR({
-      year: date.getUTCFullYear(),
-      month: date.getUTCMonth() + 1,
-      day: date.getUTCDate(),
-    });
-  }
   if (typeof value === "string" && value) {
     const parsed = parseDateOnly(value);
     if (parsed) {
@@ -139,8 +116,8 @@ function toDateInput(value: unknown): string {
       day: value.getUTCDate(),
     });
   }
-  if (value && typeof (value as { toDate?: () => Date }).toDate === "function") {
-    const date = (value as { toDate: () => Date }).toDate();
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const date = new Date(value);
     if (!date || Number.isNaN(date.getTime())) return "";
     return formatDateOnlyBR({
       year: date.getUTCFullYear(),
@@ -188,30 +165,7 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
   const [editDateValue, setEditDateValue] = useState("");
   const [editPercentValue, setEditPercentValue] = useState("");
   const [savingUpdateEdit, setSavingUpdateEdit] = useState(false);
-  const { db: firestore, error: firestoreError } = useMemo(() => tryGetFirestore(), []);
   const { ready: isAuthReady, issue: authIssue } = useFirebaseAuthSession();
-
-  const resolveMillis = useCallback((value: unknown): number | null => {
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    if (value instanceof Date) {
-      const time = value.getTime();
-      return Number.isNaN(time) ? null : time;
-    }
-    if (typeof value === "string" && value.trim()) {
-      const parsed = new Date(value);
-      return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
-    }
-    if (value && typeof (value as { toMillis?: () => number }).toMillis === "function") {
-      const millis = (value as { toMillis: () => number }).toMillis();
-      return typeof millis === "number" && Number.isFinite(millis) ? millis : null;
-    }
-    if (value && typeof (value as { seconds?: number; nanoseconds?: number }).seconds === "number") {
-      const maybe = value as { seconds: number; nanoseconds?: number };
-      const millis = maybe.seconds * 1000 + Math.round((maybe.nanoseconds ?? 0) / 1_000_000);
-      return Number.isFinite(millis) ? millis : null;
-    }
-    return null;
-  }, []);
 
   const recomputeProgressAfterEdit = useCallback(async () => {
     try {
@@ -235,13 +189,6 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
     }
   }, [serviceId]);
 
-  useEffect(() => {
-    if (firestoreError) {
-      console.error("[servicos/:id] Firestore indisponível", firestoreError);
-      toast.error("Configuração de banco de dados indisponível.");
-    }
-  }, [firestoreError]);
-
   const totalPeso = useMemo(
     () =>
       checklist.reduce((acc, item) => {
@@ -254,35 +201,25 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
 
   const refreshUpdates = useCallback(
     async (options?: { cancelledRef?: { current: boolean } }) => {
-      if (!firestore || !isAuthReady) return;
+      if (!isAuthReady) return;
       const cancelledRef = options?.cancelledRef;
       setUpdatesLoading(true);
       try {
-        const ref = doc(firestore, "services", serviceId);
-        const parseDate = (value: unknown): Date | null => {
-          if (value instanceof Timestamp) return value.toDate();
-          if (value && typeof (value as { toDate?: () => Date }).toDate === "function") {
-            return (value as { toDate: () => Date }).toDate();
-          }
-          if (typeof value === "number" && Number.isFinite(value)) {
-            const parsed = new Date(value);
-            return Number.isNaN(parsed.getTime()) ? null : parsed;
-          }
-          if (typeof value === "string" && value.trim()) {
-            const parsed = new Date(value);
-            return Number.isNaN(parsed.getTime()) ? null : parsed;
-          }
-          return null;
+        const response = await managementFetch(`/api/pcm/servicos/${encodeURIComponent(serviceId)}/edit-data`, {
+          cache: "no-store",
+        });
+        const result = (await response.json()) as {
+          ok?: boolean;
+          updates?: Array<Record<string, unknown>>;
+          legacyUpdates?: Array<Record<string, unknown>>;
+          error?: string;
         };
+        if (!response.ok || !result.ok) throw new Error(result.error ?? "Não foi possível carregar o histórico.");
 
-        const mapUpdate = (
-          docSnap: Awaited<ReturnType<typeof getDocs>>["docs"][number],
-          source: UpdateHistoryItem["source"],
-        ): UpdateHistoryItem => {
-          const data = docSnap.data() ?? {};
-          const dateSource = data.date ?? data.reportDate ?? data.createdAt ?? (docSnap.metadata.hasPendingWrites ? null : docSnap.createTime);
-          const date = parseDate(dateSource);
-
+        const mapUpdate = (data: Record<string, unknown>, source: UpdateHistoryItem["source"]): UpdateHistoryItem => {
+          const dateSource = data.date ?? data.reportDate ?? data.createdAt;
+          const parsed = typeof dateSource === "number" ? new Date(dateSource) : new Date(String(dateSource ?? ""));
+          const date = Number.isNaN(parsed.getTime()) ? null : parsed;
           const rawPercent =
             typeof data.realPercentSnapshot === "number"
               ? data.realPercentSnapshot
@@ -295,7 +232,7 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
                     : undefined;
 
           return {
-            id: docSnap.id,
+            id: String(data.id ?? ""),
             date,
             note: typeof data.note === "string" ? data.note : typeof data.description === "string" ? data.description : undefined,
             totalPct: typeof rawPercent === "number" ? rawPercent : undefined,
@@ -304,14 +241,9 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
           };
         };
 
-        const [newUpdatesSnap, legacyUpdatesSnap] = await Promise.all([
-          getDocs(query(collection(ref, "updates"), orderBy("createdAt", "desc"), limit(50))),
-          getDocs(query(collection(ref, "serviceUpdates"), orderBy("date", "desc"), limit(50))),
-        ]);
-
         const mapped: UpdateHistoryItem[] = [
-          ...newUpdatesSnap.docs.map((docSnap) => mapUpdate(docSnap, "updates")),
-          ...legacyUpdatesSnap.docs.map((docSnap) => mapUpdate(docSnap, "serviceUpdates")),
+          ...(result.updates ?? []).map((update) => mapUpdate(update, "updates")),
+          ...(result.legacyUpdates ?? []).map((update) => mapUpdate(update, "serviceUpdates")),
         ].sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0));
 
         const filtered = mapped.filter((item) => {
@@ -329,19 +261,17 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
         if (!cancelledRef?.current) setUpdatesLoading(false);
       }
     },
-    [firestore, isAuthReady, serviceId],
+    [isAuthReady, serviceId],
   );
 
   useEffect(() => {
-    if (!firestore || !isAuthReady) return;
+    if (!isAuthReady) return;
     setLoadingPackages(true);
-    getDocs(query(collection(firestore, "packages"), orderBy("nome", "asc")))
-      .then((snapshot) => {
-        const result: PackageOption[] = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data() ?? {};
-          return { id: docSnap.id, nome: String(data.nome ?? data.name ?? "") };
-        });
-        setPackages(result);
+    managementFetch(`/api/pcm/servicos/${encodeURIComponent(serviceId)}/edit-data`, { cache: "no-store" })
+      .then(async (response) => {
+        const result = (await response.json()) as { ok?: boolean; packages?: PackageOption[]; error?: string };
+        if (!response.ok || !result.ok) throw new Error(result.error ?? "Não foi possível carregar pacotes.");
+        setPackages(result.packages ?? []);
       })
       .catch((error) => {
         console.error("[servicos/:id] Falha ao carregar pacotes", error);
@@ -356,10 +286,10 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
         }
       })
       .finally(() => setLoadingPackages(false));
-  }, [firestore, isAuthReady]);
+  }, [isAuthReady, serviceId]);
 
   useEffect(() => {
-    if (!firestore || !isAuthReady) return;
+    if (!isAuthReady) return;
     const cancelledRef = { current: false };
     refreshUpdates({ cancelledRef }).catch((error) => {
       console.error("[servicos/:id] Falha ao carregar histórico", error);
@@ -370,15 +300,14 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
     async function load() {
       setLoading(true);
       try {
-        const ref = doc(firestore, "services", serviceId);
-        const snap = await getDoc(ref);
-        if (!snap.exists()) {
-          toast.error("Serviço não encontrado.");
-          return;
-        }
+        const response = await managementFetch(`/api/pcm/servicos/${encodeURIComponent(serviceId)}/edit-data`, {
+          cache: "no-store",
+        });
+        const result = (await response.json()) as { ok?: boolean; service?: Record<string, unknown>; error?: string };
+        if (!response.ok || !result.ok || !result.service) throw new Error(result.error ?? "Serviço não encontrado.");
         if (cancelled) return;
 
-        const data = snap.data() ?? {};
+        const data = result.service;
         const rawCnpj = typeof data.cnpj === "string" ? data.cnpj : "";
         setForm({
           os: String(data.os ?? ""),
@@ -423,7 +352,7 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
       cancelled = true;
       cancelledRef.current = true;
     };
-  }, [firestore, isAuthReady, refreshUpdates, serviceId]);
+  }, [isAuthReady, refreshUpdates, serviceId]);
 
   const startEditingUpdate = useCallback((update: UpdateHistoryItem) => {
     setEditingUpdateId(update.id);
@@ -449,7 +378,7 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
   }, []);
 
   const saveEditingUpdate = useCallback(async () => {
-    if (!firestore || !isAuthReady || !editingUpdateId || !editingUpdateSource) return;
+    if (!isAuthReady || !editingUpdateId || !editingUpdateSource) return;
 
     const parsedDate = parseDateTimeLocal(editDateValue);
     if (!parsedDate) {
@@ -498,7 +427,6 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
     editDateValue,
     editPercentValue,
     editingUpdateId,
-    firestore,
     isAuthReady,
     refreshUpdates,
     router,
@@ -506,7 +434,7 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
   ]);
 
   const deleteEditingUpdate = useCallback(async () => {
-    if (!firestore || !isAuthReady || !editingUpdateId || !editingUpdateSource) return;
+    if (!isAuthReady || !editingUpdateId || !editingUpdateSource) return;
     if (!window.confirm("Tem certeza que deseja excluir este lançamento? Essa ação não pode ser desfeita.")) return;
 
     setSavingUpdateEdit(true);
@@ -543,7 +471,6 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
     cancelEditingUpdate,
     editingUpdateId,
     editingUpdateSource,
-    firestore,
     isAuthReady,
     refreshUpdates,
     router,
@@ -598,10 +525,6 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
       return;
     }
 
-    if (!firestore) {
-      toast.error("Banco de dados indisponível.");
-      return;
-    }
     if (!isAuthReady) {
       toast.error("Sua sessão segura ainda não foi confirmada. Aguarde ou faça login novamente.");
       return;
@@ -609,7 +532,6 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
 
     setSaving(true);
     try {
-      const ref = doc(firestore, "services", serviceId);
       const payload = {
         os: form.os.trim(),
         oc: form.oc.trim() || null,
@@ -617,8 +539,8 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
         equipamento: form.equipamento.trim(),
         equipmentName: form.equipamento.trim(),
         setor: form.setor.trim() || null,
-        inicioPrevisto: Timestamp.fromMillis(inicioMillis),
-        fimPrevisto: Timestamp.fromMillis(fimMillis),
+        inicioPrevisto: inicioMillis,
+        fimPrevisto: fimMillis,
         horasPrevistas: horas,
         empresaId: form.empresaId.trim() || null,
         company: form.empresaId.trim() || null,
@@ -634,9 +556,13 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
               peso: Math.max(0, Math.min(100, Number(item.peso) || 0)),
             }))
           : [],
-        updatedAt: serverTimestamp(),
       };
-      await updateDoc(ref, payload);
+      const response = await managementFetch(`/api/pcm/servicos/${encodeURIComponent(serviceId)}/edit-data`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Não foi possível salvar as alterações.");
       await invalidateServiceDashboardCache();
       await recomputeProgressAfterEdit();
       toast.success("Serviço atualizado com sucesso.");
@@ -650,21 +576,13 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
   }
 
   async function changeStatus(status: (typeof STATUS_OPTIONS)[number], progresso?: number) {
-    if (!firestore) {
-      toast.error("Banco de dados indisponível.");
-      return;
-    }
     if (!isAuthReady) {
       toast.error("Sua sessão segura ainda não foi confirmada. Aguarde ou faça login novamente.");
       return;
     }
     setSaving(true);
     try {
-      const ref = doc(firestore, "services", serviceId);
-      const payload: Record<string, unknown> = {
-        status,
-        updatedAt: serverTimestamp(),
-      };
+      const payload: Record<string, unknown> = { status };
       let nextProgress: number | null = null;
       const clamp = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
       const currentProgress = Number.isFinite(andamento) ? clamp(andamento) : 0;
@@ -711,11 +629,16 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
         payload.realPercentSnapshot = nextProgress;
         payload.percent = nextProgress;
         payload.percentualRealAtual = nextProgress;
-        payload.lastProgressUpdateAt = serverTimestamp();
-        payload.lastUpdateDate = serverTimestamp();
+        payload.lastProgressUpdateAt = true;
+        payload.lastUpdateDate = true;
       }
 
-      await updateDoc(ref, payload);
+      const response = await managementFetch(`/api/pcm/servicos/${encodeURIComponent(serviceId)}/edit-data`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !result?.ok) throw new Error(result?.error ?? "Não foi possível alterar o status.");
       await invalidateServiceDashboardCache();
       setForm((prev) => ({ ...prev, status }));
       if (nextProgress !== null) {
@@ -735,16 +658,6 @@ export default function ServiceEditorClient({ serviceId }: ServiceEditorClientPr
       <div className="grid gap-6">
         <div className="rounded-2xl border bg-amber-50 p-6 text-sm text-amber-700 shadow-sm">
           {authIssue ?? "Sincronizando sessão segura. Aguarde..."}
-        </div>
-      </div>
-    );
-  }
-
-  if (!firestore) {
-    return (
-      <div className="grid gap-6">
-        <div className="rounded-2xl border bg-card/80 p-6 text-sm text-amber-600 shadow-sm">
-          Não foi possível carregar o banco de dados. Verifique a configuração do Firebase.
         </div>
       </div>
     );

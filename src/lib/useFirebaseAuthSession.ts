@@ -1,115 +1,47 @@
-import { useEffect, useMemo, useState } from "react";
-import { onAuthStateChanged, type Auth, type User } from "firebase/auth";
+import { useEffect, useState } from "react";
 
-import { tryGetAuth } from "@/lib/firebase";
+export type PcmSessionUser = {
+  uid: string;
+  email: string;
+  isAnonymous: false;
+};
 
 export type FirebaseAuthSession = {
-  auth: Auth | null;
-  user: User | null;
+  auth: null;
+  user: PcmSessionUser | null;
   ready: boolean;
   syncing: boolean;
   issue: string | null;
   error: Error | null;
 };
 
+const initialState: FirebaseAuthSession = {
+  auth: null,
+  user: null,
+  ready: false,
+  syncing: true,
+  issue: "Verificando sessão PCM...",
+  error: null,
+};
+
 export function useFirebaseAuthSession(): FirebaseAuthSession {
-  const { auth, error } = useMemo(() => tryGetAuth(), []);
-  const [state, setState] = useState<FirebaseAuthSession>(() => {
-    if (error) {
-      return {
-        auth: null,
-        user: null,
-        ready: false,
-        syncing: false,
-        issue: "Autenticação indisponível. Atualize a página ou contate o suporte.",
-        error,
-      };
-    }
-    if (!auth) {
-      return {
-        auth: null,
-        user: null,
-        ready: false,
-        syncing: false,
-        issue: "Não foi possível inicializar a autenticação segura.",
-        error: null,
-      };
-    }
-    if (auth.currentUser) {
-      return {
-        auth,
-        user: auth.currentUser,
-        ready: true,
-        syncing: false,
-        issue: null,
-        error: null,
-      };
-    }
-    return {
-      auth,
-      user: null,
-      ready: false,
-      syncing: true,
-      issue: "Sincronizando sessão segura. Aguarde...",
-      error: null,
-    };
-  });
+  const [state, setState] = useState(initialState);
 
   useEffect(() => {
-    if (error) {
-      setState({
-        auth: null,
-        user: null,
-        ready: false,
-        syncing: false,
-        issue: "Autenticação indisponível. Atualize a página ou contate o suporte.",
-        error,
-      });
-      return;
-    }
+    let active = true;
 
-    if (!auth) {
-      setState({
-        auth: null,
-        user: null,
-        ready: false,
-        syncing: false,
-        issue: "Não foi possível inicializar a autenticação segura.",
-        error: null,
-      });
-      return;
-    }
+    async function checkSession() {
+      try {
+        const response = await fetch("/api/pcm/session", { cache: "no-store" });
+        const session = response.ok
+          ? ((await response.json()) as { authenticated?: boolean; email?: string })
+          : null;
 
-    if (auth.currentUser) {
-      setState({
-        auth,
-        user: auth.currentUser,
-        ready: true,
-        syncing: false,
-        issue: null,
-        error: null,
-      });
-      return;
-    }
-
-    setState({
-      auth,
-      user: null,
-      ready: false,
-      syncing: true,
-      issue: "Sincronizando sessão segura. Aguarde...",
-      error: null,
-    });
-
-    let mounted = true;
-    const unsubscribe = onAuthStateChanged(
-      auth,
-      (nextUser) => {
-        if (!mounted) return;
-        if (nextUser) {
+        if (!active) return;
+        if (session?.authenticated && session.email) {
           setState({
-            auth,
-            user: nextUser,
+            auth: null,
+            user: { uid: "pcm-fixed-login", email: session.email, isAnonymous: false },
             ready: true,
             syncing: false,
             issue: null,
@@ -117,7 +49,7 @@ export function useFirebaseAuthSession(): FirebaseAuthSession {
           });
         } else {
           setState({
-            auth,
+            auth: null,
             user: null,
             ready: false,
             syncing: false,
@@ -125,27 +57,26 @@ export function useFirebaseAuthSession(): FirebaseAuthSession {
             error: null,
           });
         }
-      },
-      (listenerError) => {
-        if (!mounted) return;
-        const mappedError =
-          listenerError instanceof Error ? listenerError : new Error(String(listenerError));
+      } catch (error) {
+        if (!active) return;
+        const sessionError = error instanceof Error ? error : new Error(String(error));
+        console.error("[pcm-session] Falha ao verificar a sessão", sessionError);
         setState({
-          auth,
+          auth: null,
           user: null,
           ready: false,
           syncing: false,
-          issue: "Não foi possível validar sua sessão segura.",
-          error: mappedError,
+          issue: "Não foi possível validar sua sessão PCM.",
+          error: sessionError,
         });
-      },
-    );
+      }
+    }
 
+    void checkSession();
     return () => {
-      mounted = false;
-      unsubscribe();
+      active = false;
     };
-  }, [auth, error]);
+  }, []);
 
   return state;
 }

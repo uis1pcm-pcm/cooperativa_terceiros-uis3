@@ -14,8 +14,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { tryGetAuth } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
+import { managementFetch } from "@/lib/managementFetch";
 
 export type DeletePackageButtonProps = {
   packageId: string;
@@ -39,19 +39,9 @@ export default function DeletePackageButton({
     setIsDeleting(true);
 
     try {
-      const { auth, error } = tryGetAuth();
-      const user = auth?.currentUser;
-      if (!user) {
-        throw error ?? new Error("Faça login novamente para excluir o pacote.");
-      }
-
-      const idToken = await user.getIdToken();
       const encodedId = encodeURIComponent(packageId);
-      const response = await fetch(`/api/pcm/packages/${encodedId}`, {
+      const response = await managementFetch(`/api/pcm/packages/${encodedId}`, {
         method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${idToken}`,
-        },
       });
 
       let data: unknown = null;

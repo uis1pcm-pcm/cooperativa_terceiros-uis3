@@ -172,7 +172,7 @@ export async function getLatestServiceToken(serviceId: string): Promise<ServiceA
 
 type EnsureServiceTokenInput = { serviceId: string; company?: string | null };
 
-function randomToken(length = 8) {
+export function randomToken(length = 8) {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = crypto.randomBytes(length);
   let token = "";

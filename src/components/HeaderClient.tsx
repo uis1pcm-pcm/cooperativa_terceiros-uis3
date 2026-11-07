@@ -1,9 +1,6 @@
 "use client";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth/useAuth";
-import { signOut } from "firebase/auth";
-
-import { tryGetAuth } from "@/lib/firebase";
 import ThemeToggle from "@/components/ThemeToggle";
 
 export default function HeaderClient() {
@@ -16,12 +13,6 @@ export default function HeaderClient() {
       console.error("[header] Falha ao encerrar sessão PCM", error);
     }
 
-    const { auth, error } = tryGetAuth();
-    if (!auth) {
-      console.error("[header] Autenticação indisponível", error);
-      return;
-    }
-    await signOut(auth);
     window.location.href = "/login";
   }
 
