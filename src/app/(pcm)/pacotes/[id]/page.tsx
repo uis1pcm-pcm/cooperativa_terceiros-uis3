@@ -591,6 +591,7 @@ async function renderPackageDetailPage(
     }
   }
 
+  const updatesById = new Map<string, Service["updates"]>();
   const allKnownServiceIds = new Set([...uniqueServiceIds, ...folderOnlyServiceIds]);
   if (allKnownServiceIds.size > serviceCountReference) {
     serviceCountReference = allKnownServiceIds.size;
@@ -620,7 +621,6 @@ async function renderPackageDetailPage(
   // subcoleções, portanto sempre buscamos o histórico canônico antes de montar
   // as curvas e o relatório Excel do pacote.
   if (services.length) {
-    const updatesById = new Map<string, Service["updates"]>();
     const chunkSize = 15;
 
     for (let i = 0; i < services.length; i += chunkSize) {
@@ -650,6 +650,37 @@ async function renderPackageDetailPage(
         const resolvedUpdates = updatesById.get(service.id);
         if (!resolvedUpdates) return service;
         return { ...service, updates: resolvedUpdates };
+      });
+    }
+  }
+
+  const folderServiceIdsWithoutUpdates = folderServiceSelection.folderServiceIds.filter(
+    (serviceId) => scheduleServicesById.has(serviceId) && !updatesById.has(serviceId),
+  );
+  if (folderServiceIdsWithoutUpdates.length) {
+    const chunkSize = 15;
+    for (let i = 0; i < folderServiceIdsWithoutUpdates.length; i += chunkSize) {
+      const slice = folderServiceIdsWithoutUpdates.slice(i, i + chunkSize);
+      const results = await Promise.allSettled(
+        slice.map(async (serviceId) => {
+          const service = scheduleServicesById.get(serviceId);
+          return {
+            id: serviceId,
+            updates: await listUpdates(serviceId, 200, service?.hasLegacyServiceUpdates),
+          };
+        }),
+      );
+
+      results.forEach((result) => {
+        if (result.status === "fulfilled") {
+          updatesById.set(result.value.id, result.value.updates);
+        } else {
+          registerWarning(
+            "Alguns históricos de progresso dos subpacotes não puderam ser carregados.",
+            result.reason,
+            "Falha ao carregar histórico de atualização de serviço do subpacote",
+          );
+        }
       });
     }
   }
@@ -772,7 +803,27 @@ async function renderPackageDetailPage(
     };
   });
 
-  const subpackageMetrics = calcularMetricasSubpacote(servicesWithFolderContext, referenceDate);
+  // The subpackage summary uses every folder reference, not only the capped
+  // service list used to render package details.
+  const subpackageMetricServicesById = new Map(services.map((service) => [service.id, service]));
+  folderServiceSelection.folderServiceIds.forEach((serviceId) => {
+    const service = scheduleServicesById.get(serviceId);
+    if (service && !subpackageMetricServicesById.has(serviceId)) {
+      subpackageMetricServicesById.set(serviceId, service);
+    }
+  });
+  const subpackageMetricServices = Array.from(subpackageMetricServicesById.values()).map((service) => {
+    const folderData = folderLookup.get(service.id);
+    const directFolderId = (service as { folderId?: string | null }).folderId;
+    return {
+      ...service,
+      updates: updatesById.get(service.id) ?? service.updates,
+      folderId: folderData?.id ?? directFolderId ?? null,
+      folderName: folderData?.name ?? null,
+    };
+  });
+
+  const subpackageMetrics = calcularMetricasSubpacote(subpackageMetricServices, referenceDate);
   const sectorMetrics = calcularMetricasPorSetor(servicesWithFolderContext, referenceDate);
 
   const formatPercentValue = (value: number): string => {

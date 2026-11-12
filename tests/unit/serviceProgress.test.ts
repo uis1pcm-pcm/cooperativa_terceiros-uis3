@@ -71,6 +71,49 @@ describe("serviceProgress utilities", () => {
       expect(metric.plannedPercent).not.toBe(Math.round(metric.plannedPercent));
     });
 
+    it("uses the subpackage schedule for services missing one of their planned dates", () => {
+      const [metric] = calcularMetricasSubpacote(
+        [
+          {
+            id: "completed-service",
+            os: "OS-1",
+            folderId: "folder-1",
+            folderName: "Subpacote",
+            totalHours: 1,
+            status: "Aberto" as const,
+            createdAt: 0,
+            plannedStart: "2025-01-01",
+            plannedEnd: "2025-01-02",
+          },
+          {
+            id: "service-without-end",
+            os: "OS-2",
+            folderId: "folder-1",
+            folderName: "Subpacote",
+            totalHours: 10,
+            status: "Aberto" as const,
+            createdAt: 0,
+            plannedStart: "2025-01-01",
+            plannedEnd: "",
+          },
+          {
+            id: "service-without-start",
+            os: "OS-3",
+            folderId: "folder-1",
+            folderName: "Subpacote",
+            totalHours: 10,
+            status: "Aberto" as const,
+            createdAt: 0,
+            plannedStart: "",
+            plannedEnd: "2025-01-11",
+          },
+        ],
+        "2025-01-06",
+      );
+
+      expect(metric.plannedPercent).toBe(56.71);
+    });
+
     it("mantém o percentual atual ao alterar somente a data de referência", () => {
       const services = [
         {
@@ -1000,6 +1043,19 @@ describe("serviceProgress utilities", () => {
       });
       expect(intervalo.inicio?.toISOString()).toBe(new Date("2024-02-10T00:00:00.000Z").toISOString());
       expect(intervalo.fim?.toISOString()).toBe(new Date("2024-03-01T00:00:00.000Z").toISOString());
+    });
+
+    it("does not use a lone end or start date to distort the opposite boundary", () => {
+      const intervalo = obterIntervaloSubpacote({
+        servicos: [
+          { dataInicio: "2024-02-05", dataFim: "2024-02-20" },
+          { dataFim: "2024-02-01" },
+          { dataInicio: "2024-03-10" },
+        ],
+      });
+
+      expect(intervalo.inicio?.toISOString()).toBe("2024-02-05T00:00:00.000Z");
+      expect(intervalo.fim?.toISOString()).toBe("2024-02-20T00:00:00.000Z");
     });
 
     it("recalculates the range when services are added, changed, or removed", () => {

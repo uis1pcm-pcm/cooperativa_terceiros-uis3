@@ -601,8 +601,9 @@ export function obterIntervaloSubpacote(
   subpacote: SubpacotePlanejado | null | undefined,
 ): { inicio: Date | null; fim: Date | null } {
   const servicos = coletarServicosDoSubpacote(subpacote);
-  let menor: Date | null = null;
-  let maior: Date | null = null;
+  const inicios: Date[] = [];
+  const fins: Date[] = [];
+  const datasDisponiveis: Date[] = [];
   for (const servico of servicos) {
     const inicio = getDateFromKeys(servico, [
       "dataInicio",
@@ -620,18 +621,27 @@ export function obterIntervaloSubpacote(
       "endDate",
       "fim",
     ]);
-    const limiteInicio = inicio ?? fim;
-    const limiteFim = fim ?? inicio;
-    if (!limiteInicio || !limiteFim) continue;
-
-    if (!menor || limiteInicio.getTime() < menor.getTime()) {
-      menor = limiteInicio;
-    }
-    if (!maior || limiteFim.getTime() > maior.getTime()) {
-      maior = limiteFim;
-    }
+    if (inicio) inicios.push(inicio);
+    if (fim) fins.push(fim);
+    if (inicio) datasDisponiveis.push(inicio);
+    if (fim) datasDisponiveis.push(fim);
   }
-  return { inicio: menor, fim: maior };
+
+  const menorData = (datas: Date[]) =>
+    datas.reduce<Date | null>(
+      (menor, data) => (!menor || data.getTime() < menor.getTime() ? data : menor),
+      null,
+    );
+  const maiorData = (datas: Date[]) =>
+    datas.reduce<Date | null>(
+      (maior, data) => (!maior || data.getTime() > maior.getTime() ? data : maior),
+      null,
+    );
+
+  return {
+    inicio: menorData(inicios) ?? menorData(datasDisponiveis),
+    fim: maiorData(fins) ?? maiorData(datasDisponiveis),
+  };
 }
 
 function coletarServicosDoPacote(pacote: PacotePlanejado | null | undefined): ServicoDoSubpacote[] {
@@ -1243,7 +1253,34 @@ export function calcularMetricasSubpacote(
   return Array.from(grupos.values())
     .map((grupo) => {
       const servicosNormalizados = normalizarServicosParaSubpacote(grupo.servicos);
-      const subpacotePlanejado = { servicos: servicosNormalizados };
+      const intervaloSubpacote = obterIntervaloSubpacote({ servicos: servicosNormalizados });
+      // Avoid biasing the planned average by excluding services without both individual dates.
+      const servicosComCronograma = servicosNormalizados.map((servico) => {
+        if (
+          resolveDateRange(servico) ||
+          !intervaloSubpacote.inicio ||
+          !intervaloSubpacote.fim ||
+          intervaloSubpacote.fim <= intervaloSubpacote.inicio
+        ) {
+          return servico;
+        }
+
+        return {
+          ...servico,
+          dataInicio: intervaloSubpacote.inicio,
+          inicioPrevisto: intervaloSubpacote.inicio,
+          inicioPlanejado: intervaloSubpacote.inicio,
+          plannedStart: intervaloSubpacote.inicio,
+          startDate: intervaloSubpacote.inicio,
+          dataFim: intervaloSubpacote.fim,
+          fimPrevisto: intervaloSubpacote.fim,
+          fimPlanejado: intervaloSubpacote.fim,
+          plannedEnd: intervaloSubpacote.fim,
+          endDate: intervaloSubpacote.fim,
+          plannedDaily: undefined,
+        };
+      });
+      const subpacotePlanejado = { servicos: servicosComCronograma };
       const plannedPercentRaw = clampPercentageValue(
         calcularPercentualSubpacote(subpacotePlanejado, referenceDate) ?? 0,
       );
