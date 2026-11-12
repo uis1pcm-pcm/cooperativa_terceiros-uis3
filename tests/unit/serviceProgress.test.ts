@@ -71,6 +71,49 @@ describe("serviceProgress utilities", () => {
       expect(metric.plannedPercent).not.toBe(Math.round(metric.plannedPercent));
     });
 
+    it("uses the subpackage schedule for services missing one of their planned dates", () => {
+      const [metric] = calcularMetricasSubpacote(
+        [
+          {
+            id: "completed-service",
+            os: "OS-1",
+            folderId: "folder-1",
+            folderName: "Subpacote",
+            totalHours: 1,
+            status: "Aberto" as const,
+            createdAt: 0,
+            plannedStart: "2025-01-01",
+            plannedEnd: "2025-01-02",
+          },
+          {
+            id: "service-without-end",
+            os: "OS-2",
+            folderId: "folder-1",
+            folderName: "Subpacote",
+            totalHours: 10,
+            status: "Aberto" as const,
+            createdAt: 0,
+            plannedStart: "2025-01-01",
+            plannedEnd: "",
+          },
+          {
+            id: "service-without-start",
+            os: "OS-3",
+            folderId: "folder-1",
+            folderName: "Subpacote",
+            totalHours: 10,
+            status: "Aberto" as const,
+            createdAt: 0,
+            plannedStart: "",
+            plannedEnd: "2025-01-11",
+          },
+        ],
+        "2025-01-06",
+      );
+
+      expect(metric.plannedPercent).toBe(56.71);
+    });
+
     it("mantém o percentual atual ao alterar somente a data de referência", () => {
       const services = [
         {

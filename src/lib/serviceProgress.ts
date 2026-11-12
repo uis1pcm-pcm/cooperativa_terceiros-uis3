@@ -1243,7 +1243,34 @@ export function calcularMetricasSubpacote(
   return Array.from(grupos.values())
     .map((grupo) => {
       const servicosNormalizados = normalizarServicosParaSubpacote(grupo.servicos);
-      const subpacotePlanejado = { servicos: servicosNormalizados };
+      const intervaloSubpacote = obterIntervaloSubpacote({ servicos: servicosNormalizados });
+      // Avoid biasing the planned average by excluding services without both individual dates.
+      const servicosComCronograma = servicosNormalizados.map((servico) => {
+        if (
+          resolveDateRange(servico) ||
+          !intervaloSubpacote.inicio ||
+          !intervaloSubpacote.fim ||
+          intervaloSubpacote.fim <= intervaloSubpacote.inicio
+        ) {
+          return servico;
+        }
+
+        return {
+          ...servico,
+          dataInicio: intervaloSubpacote.inicio,
+          inicioPrevisto: intervaloSubpacote.inicio,
+          inicioPlanejado: intervaloSubpacote.inicio,
+          plannedStart: intervaloSubpacote.inicio,
+          startDate: intervaloSubpacote.inicio,
+          dataFim: intervaloSubpacote.fim,
+          fimPrevisto: intervaloSubpacote.fim,
+          fimPlanejado: intervaloSubpacote.fim,
+          plannedEnd: intervaloSubpacote.fim,
+          endDate: intervaloSubpacote.fim,
+          plannedDaily: undefined,
+        };
+      });
+      const subpacotePlanejado = { servicos: servicosComCronograma };
       const plannedPercentRaw = clampPercentageValue(
         calcularPercentualSubpacote(subpacotePlanejado, referenceDate) ?? 0,
       );
