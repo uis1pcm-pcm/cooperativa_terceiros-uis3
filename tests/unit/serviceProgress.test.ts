@@ -1045,6 +1045,19 @@ describe("serviceProgress utilities", () => {
       expect(intervalo.fim?.toISOString()).toBe(new Date("2024-03-01T00:00:00.000Z").toISOString());
     });
 
+    it("does not use a lone end or start date to distort the opposite boundary", () => {
+      const intervalo = obterIntervaloSubpacote({
+        servicos: [
+          { dataInicio: "2024-02-05", dataFim: "2024-02-20" },
+          { dataFim: "2024-02-01" },
+          { dataInicio: "2024-03-10" },
+        ],
+      });
+
+      expect(intervalo.inicio?.toISOString()).toBe("2024-02-05T00:00:00.000Z");
+      expect(intervalo.fim?.toISOString()).toBe("2024-02-20T00:00:00.000Z");
+    });
+
     it("recalculates the range when services are added, changed, or removed", () => {
       const originalServices = [
         { dataInicio: "2024-02-10", dataFim: "2024-02-20" },
